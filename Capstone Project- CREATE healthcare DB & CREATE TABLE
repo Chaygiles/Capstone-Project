@@ -1,0 +1,197 @@
+/* I created the healthcare DB to showcase my knowledge
+Below, I am creating the necessary tables for the capstone project
+*/
+
+--APPOINTMENTS TABLE
+
+CREATE TABLE appointments (
+	appointment_id INT PRIMARY KEY,
+	--patid INT FOREIGN KEY REFERENCES pat(patid),
+	--provider_id INT FOREIGN KEY REFERENCES providers(provider_id),
+	scheduled_date DATE NOT NULL,
+	appointment_date DATE NOT NULL,
+	appointment_type VARCHAR(20) NOT NULL,
+	status VARCHAR(10) NOT NULL,
+	wait_days INT NOT NULL
+	
+)
+
+--CLAIMS TABLE
+
+CREATE TABLE claims (
+	claim_id INT PRIMARY KEY,
+	--encounter_id INT FOREIGN KEY REFERENCES encounter(encounter_id)NOT NULL,
+	--patid INT FOREIGN KEY REFERENCES pat(patid) NOT NULL,
+	--plan_id INT FOREIGN KEY REFERENCES plans(plan_id)NOT NULL,
+	claim_date DATE NOT NULL,
+	billed_amount NUMERIC(12,2) NOT NULL,
+	allowed_amount NUMERIC(12,2) NOT NULL,
+	paid_amount NUMERIC(12,2) NOT NULL,
+	pat_responsibility NUMERIC(12,2) NOT NULL,
+	claim_status VARCHAR(10) NOT NULL,
+	processing_days INT NOT NULL
+)
+
+
+
+CREATE TABLE departments(
+	department_id INT PRIMARY KEY,
+	department_name VARCHAR(20) NOT NULL,
+	specialty_group VARCHAR(20) NOT NULL
+)
+	--DIAGNOSIS TABLE
+
+CREATE TABLE diagnosis(
+	diagnosis_id INT PRIMARY KEY,
+	department_name VARCHAR(20) NOT NULL,
+	icd10_code VARCHAR(20) NOT NULL,
+	diagnosis_description VARCHAR(20) NOT NULL,
+	diagnosis_category VARCHAR(20) NOT NULL,
+	primary_flag VARCHAR(20) NOT NULL
+	
+)
+	-- ENCOUNTERS TABLE
+	
+CREATE TABLE encounters (
+    encounter_id INT PRIMARY KEY,
+    department_id INT NOT NULL REFERENCES departments(department_id),
+    appointment_id INT NOT NULL REFERENCES appointments(appointment_id),
+    encounter_date DATE NOT NULL,
+    encounter_type VARCHAR(10) NOT NULL,
+    admit_source VARCHAR(20) NOT NULL,
+    discharge_status VARCHAR(20) NOT NULL,
+    stay_days INT NOT NULL,
+    total_charge NUMERIC(12,2) NOT NULL
+	--provider_id INT FOREIGN KEY REFERENCES provider(provider_id)NOT NULL,
+	--patid INT NOT NULL REFERENCES pat(patid),
+)
+
+-- INSURANCE TABLE
+
+CREATE TABLE insurance_plans (
+    plan_id INT PRIMARY KEY,
+    payer_name VARCHAR(50) NOT NULL,
+    plan_name VARCHAR(50) NOT NULL,
+    plan_type VARCHAR(20) NOT NULL,
+    deductible NUMERIC(10,2) NOT NULL,
+    coinsurance_pct NUMERIC(5,4) NOT NULL
+)
+
+-- MEDICATIONS TABLE 
+
+CREATE TABLE medications (
+    medorder_id INT PRIMARY KEY,
+    encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
+   -- patid INT NOT NULL REFERENCES pat(patid),
+    med_name VARCHAR(50) NOT NULL,
+    med_class VARCHAR(50) NOT NULL,
+    dose VARCHAR(20) NOT NULL,
+    route VARCHAR(20) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE
+)
+
+
+
+
+--PATIENT TABLE 
+
+CREATE TABLE pat (
+    patid INT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    dob DATE NOT NULL,
+    sex VARCHAR(1) NOT NULL,
+    city VARCHAR(50) NOT NULL,
+    state VARCHAR(2) NOT NULL,
+    zip_code VARCHAR(10),
+    insurance_plan_id INT NOT NULL REFERENCES insurance_plans(plan_id),
+    registration_date DATE NOT NULL,
+    active_flag VARCHAR(1) NOT NULL
+)
+
+
+--PAYMENTS TABLE 
+
+CREATE TABLE payments (
+    payment_id INT PRIMARY KEY,
+    claim_id INT NOT NULL REFERENCES claims(claim_id),
+    patid INT NOT NULL REFERENCES pat(patid),
+    payment_date DATE NOT NULL,
+    payment_source VARCHAR(20) NOT NULL,
+    amount NUMERIC(12,2) NOT NULL,
+    payment_method VARCHAR(20) NOT NULL
+)
+
+--PROCEDURES TABLE 
+
+CREATE TABLE procedures (
+    procedure_id INT PRIMARY KEY,
+    encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
+    cpt_code VARCHAR(10) NOT NULL,
+    procedure_description VARCHAR(100) NOT NULL,
+    procedure_category VARCHAR(50) NOT NULL,
+    procedure_charge NUMERIC(12,2) NOT NULL
+)
+
+--PROVIDERS TABLE 
+
+CREATE TABLE providers (
+    provider_id INT PRIMARY KEY,
+    first_name VARCHAR(50) NOT NULL,
+    last_name VARCHAR(50) NOT NULL,
+    credential VARCHAR(10) NOT NULL,
+    department_id INT NOT NULL REFERENCES departments(department_id),
+    hire_date DATE NOT NULL,
+    employment_status VARCHAR(20) NOT NULL
+)
+
+
+
+/* 
+I initially created the tables below without its foreign keys
+because they referenced tables that had not been created yet.
+Now that those tables exist, I am adding the columns and relationships.
+*/
+
+--APPOINTMENTS TABLE
+
+ALTER TABLE appointments
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id)
+
+--CLAIMS TABLE
+
+ALTER TABLE claims
+ADD COLUMN encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
+ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id)
+
+--ENCOUNTERS TABLE
+
+ALTER TABLE encounters
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id),
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid)
+
+
+/* Rescheduled is longer than VARCHAR(10) */
+ALTER TABLE appointments
+ALTER COLUMN status TYPE VARCHAR(15)
+
+
+/* Partially Paid is longer than VARCHAR(10) */
+ALTER TABLE claims
+ALTER COLUMN claim_status TYPE VARCHAR(20)
+
+
+/* Left Before Treatment is longer than VARCHAR(20) */
+ALTER TABLE encounters
+ALTER COLUMN discharge_status TYPE VARCHAR(25)
+
+
+/*
+Some emergency and inpatient encounters were not scheduled appointments,
+so appointment_id must allow NULL values.
+*/
+ALTER TABLE encounters
+ALTER COLUMN appointment_id DROP NOT NULL
