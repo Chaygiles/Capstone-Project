@@ -1,0 +1,94 @@
+/*
+I initially created the tables in the "Create healthcare DB" file without all of their foreign keys
+because some of the referenced tables had not been created yet.
+
+After creating the remaining tables, I added the missing columns
+and relationships to complete the database structure.
+*/
+
+
+-- APPOINTMENTS TABLE
+
+ALTER TABLE appointments
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id)
+
+
+-- CLAIMS TABLE
+
+ALTER TABLE claims
+ADD COLUMN encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
+ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id)
+
+
+-- ENCOUNTERS TABLE
+
+ALTER TABLE encounters
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id),
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid)
+
+
+/*
+The value "Rescheduled" is longer than the original VARCHAR(10),
+so I increased the column length to allow the full status value.
+*/
+
+ALTER TABLE appointments
+ALTER COLUMN status TYPE VARCHAR(15)
+
+
+/*
+The value "Partially Paid" is longer than the original VARCHAR(10),
+so I increased the claim_status column length.
+*/
+
+ALTER TABLE claims
+ALTER COLUMN claim_status TYPE VARCHAR(20)
+
+
+/*
+The value "Left Before Treatment" is longer than the original VARCHAR(20),
+so I increased the discharge_status column length.
+*/
+
+ALTER TABLE encounters
+ALTER COLUMN discharge_status TYPE VARCHAR(25)
+
+
+/*
+Some emergency and inpatient encounters were not tied to a scheduled appointment,
+so appointment_id needed to allow NULL values.
+*/
+
+ALTER TABLE encounters
+ALTER COLUMN appointment_id DROP NOT NULL
+
+
+-- Renamed the table to match the dataset naming convention.
+
+ALTER TABLE diagnosis
+RENAME TO diagnoses
+
+
+/*
+Some diagnosis descriptions were longer than VARCHAR(20),
+so I changed the column to TEXT to allow longer descriptions.
+*/
+
+ALTER TABLE diagnoses
+ALTER COLUMN diagnosis_description TYPE TEXT
+
+
+/*
+The medications dataset included patid, but the original table did not.
+I added the column and created a foreign key relationship to the patient table.
+*/
+
+ALTER TABLE medications
+ADD COLUMN patid INT
+
+ALTER TABLE medications
+ADD CONSTRAINT medications_patid_fkey
+FOREIGN KEY (patid)
+REFERENCES pat(patid)
