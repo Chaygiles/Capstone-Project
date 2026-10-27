@@ -1,0 +1,245 @@
+/*
+DATA CLEANING - DUPLICATE PATIENT RECORDS
+
+During data validation and cleaning, I found potential duplicate
+patients by looking for patients with matching demographic information.
+
+The goal of this section is to identify the duplicate records,
+determine which patient record should be kept, preserve any related
+records in other tables, and then safely remove the duplicate patients.
+*/
+
+
+-- Identify potential duplicate patients.
+-- patid is not included in the GROUP BY because duplicate patients
+-- can have different patient IDs even though they represent the same person.
+-- HAVING COUNT(*) > 1 returns demographic combinations that occur
+-- more than once.
+
+SELECT first_name, last_name, dob, COUNT(*)
+FROM pat
+GROUP BY first_name, last_name, dob
+HAVING COUNT(*) > 1
+ORDER BY last_name
+
+
+/*
+After identifying potential duplicates, I reviewed individual records
+to determine whether matching names and DOBs actually represented the
+same patient.
+
+For example, Evelyn Allen appeared multiple times in the results.
+Reviewing the individual records showed that not every Evelyn Allen
+was a duplicate because some had different DOBs, sex, or locations.
+*/
+
+SELECT * FROM pat
+WHERE first_name = 'Evelyn'
+    AND last_name = 'Allen'
+
+
+-- Patients 407 and 1518 were investigated further because their
+-- demographic information appeared to match.
+
+SELECT * FROM pat
+WHERE patid IN (407, 1518)
+
+
+/*
+CREATE DUPLICATE PATIENT MAPPING
+
+After confirming that duplicate patients existed, I created a temporary
+table to determine which patid should be retained and which duplicate
+patid should eventually be removed.
+
+MIN(patid) OVER (PARTITION BY...) selects the lowest patid within
+each matching demographic group as the patient record to keep.
+
+The temporary table allows the duplicate-to-original mapping to be
+reused when updating related tables.
+*/
+
+CREATE TEMP TABLE duplicate_patients AS
+SELECT patid AS duplicate_patid,MIN(patid) 
+	OVER ( PARTITION BY first_name, last_name,
+			dob, sex, city, state, zip_code
+    ) AS keep_patid
+FROM pat
+
+
+/*
+The temporary table initially includes the patient record being kept
+as well as its duplicates.
+
+Rows where duplicate_patid and keep_patid are the same are removed,
+leaving only the patient IDs that need to be merged into another record.
+*/
+
+DELETE FROM duplicate_patients
+WHERE duplicate_patid = keep_patid
+
+
+/*
+Review the mapping before modifying the database.
+
+duplicate_patid = patient record that will eventually be removed
+keep_patid      = patient record that will remain
+
+This check was performed before updating or deleting patient records.
+*/
+
+SELECT * FROM duplicate_patients
+ORDER BY keep_patid
+
+
+/*
+FOREIGN KEY RELATIONSHIPS
+
+The duplicate patient records could not simply be deleted because
+pat.patid is referenced by foreign keys in other tables.
+
+My first DELETE attempt returned a PostgreSQL foreign key constraint
+error because duplicate patient IDs were still referenced by payments.
+
+After updating payments, another constraint error showed that
+medications also referenced the duplicate patients.
+
+Instead of finding every relationship one at a time through additional
+errors, I used the query below to identify all foreign keys that
+reference pat.patid.
+
+I used AI assistance to help construct this information_schema query.
+I reviewed the query and used its results to understand which child
+tables needed to be updated before deleting duplicate patients.
+*/
+
+SELECT
+    tc.table_name,
+    kcu.column_name,
+    ccu.table_name AS referenced_table,
+    ccu.column_name AS referenced_column
+FROM information_schema.table_constraints tc
+JOIN information_schema.key_column_usage kcu
+    ON tc.constraint_name = kcu.constraint_name
+JOIN information_schema.constraint_column_usage ccu
+    ON ccu.constraint_name = tc.constraint_name
+WHERE tc.constraint_type = 'FOREIGN KEY'
+    AND ccu.table_name = 'pat';
+
+
+/*
+The information_schema query showed that pat.patid is referenced by:
+
+- appointments
+- encounters
+- claims
+- payments
+- medications
+
+Before deleting a duplicate patient, records belonging to the
+duplicate patid must therefore be reassigned to the keep_patid.
+
+This preserves the patient's related healthcare records and maintains
+referential integrity.
+*/
+
+
+-- Reassign appointments belonging to duplicate patients
+-- to the patient record being retained.
+
+UPDATE appointments a
+SET patid = d.keep_patid
+FROM duplicate_patients d
+WHERE a.patid = d.duplicate_patid;
+
+
+-- Reassign encounters belonging to duplicate patients.
+
+UPDATE encounters e
+SET patid = d.keep_patid
+FROM duplicate_patients d
+WHERE e.patid = d.duplicate_patid;
+
+
+-- Reassign claims belonging to duplicate patients.
+
+UPDATE claims c
+SET patid = d.keep_patid
+FROM duplicate_patients d
+WHERE c.patid = d.duplicate_patid;
+
+
+-- Reassign payments belonging to duplicate patients.
+
+UPDATE payments p
+SET patid = d.keep_patid
+FROM duplicate_patients d
+WHERE p.patid = d.duplicate_patid;
+
+
+-- Reassign medications belonging to duplicate patients.
+
+UPDATE medications m
+SET patid = d.keep_patid
+FROM duplicate_patients d
+WHERE m.patid = d.duplicate_patid;
+
+
+/*
+DELETE DUPLICATE PATIENTS
+
+At this point, the child-table records have been reassigned to the
+patient IDs being retained.
+
+The duplicate patient records can now be removed without losing
+related records or violating the foreign key relationships.
+*/
+
+DELETE FROM pat p
+USING duplicate_patients d
+WHERE p.patid = d.duplicate_patid;
+
+
+/*
+VALIDATE DUPLICATE REMOVAL
+
+This query checks whether any patid that was identified as a duplicate
+still exists in the patient table.
+
+Expected result: 0 rows.
+*/
+
+SELECT *
+FROM pat
+WHERE patid IN (
+    SELECT duplicate_patid
+    FROM duplicate_patients
+);
+
+
+/*
+This second validation checks whether identical patient demographic
+combinations still occur more than once after cleaning.
+
+Expected result: 0 rows for the intentional duplicate records.
+*/
+
+SELECT
+    first_name,
+    last_name,
+    dob,
+    sex,
+    city,
+    state,
+    zip_code,
+    COUNT(*)
+FROM pat
+GROUP BY
+    first_name,
+    last_name,
+    dob,
+    sex,
+    city,
+    state,
+    zip_code
+HAVING COUNT(*) > 1;

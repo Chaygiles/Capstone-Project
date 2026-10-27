@@ -1,0 +1,136 @@
+/*
+I am now validating the data that was imported into the database
+and comparing it with the expected information in the Data Dictionary.
+*/
+
+
+-- Row count validation
+
+SELECT 'departments' AS table_name, COUNT(*) AS row_count FROM departments
+UNION ALL
+SELECT 'insurance_plans', COUNT(*) FROM insurance_plans
+UNION ALL
+SELECT 'pat', COUNT(*) FROM pat
+UNION ALL
+SELECT 'providers', COUNT(*) FROM providers
+UNION ALL
+SELECT 'appointments', COUNT(*) FROM appointments
+UNION ALL
+SELECT 'encounters', COUNT(*) FROM encounters
+UNION ALL
+SELECT 'diagnoses', COUNT(*) FROM diagnoses
+UNION ALL
+SELECT 'procedures', COUNT(*) FROM procedures
+UNION ALL
+SELECT 'medications', COUNT(*) FROM medications
+UNION ALL
+SELECT 'claims', COUNT(*) FROM claims
+UNION ALL
+SELECT 'payments', COUNT(*) FROM payments
+ORDER BY table_name ASC
+
+
+-- Row count validation:
+-- The number of records imported into each table matches the expected
+-- row counts listed in the Data Dictionary.
+
+-- ORDER BY table_name ASC was added so the results appear in the same
+-- order as the Data Dictionary for easier comparison.
+
+
+
+
+-- NULL validation
+
+--NULL Validations
+
+SELECT e.appointment_id, a.appointment_id
+FROM encounters e 
+LEFT JOIN appointments a
+	ON e.appointment_id = a.appointment_id
+WHERE (e.appointment_id, a.appointment_id) IS NULL
+
+
+/*
+I began the NULL validation process by checking for missing values through individual table queries and JOINs. 
+While this approach works, I recognized that repeating the same process across every table and required column would be inefficient and difficult to scale.
+
+To make the validation process more efficient, I researched PostgreSQL metadata and learned to use information_schema to identify columns defined as NOT NULL. 
+This lets me compare the database structure against the Data Dictionary and focus my validation on columns expected to contain values.
+*/
+
+
+/* NULL VALIDATION - REQUIRED COLUMNS 
+
+I will be removing this from the capstone itself because I realized, while reviewing the Data Dictionary, which tables were already NULL and NOT NULL.
+
+
+SELECT
+    table_name,
+    column_name,
+    data_type,
+    is_nullable
+FROM information_schema.columns
+WHERE table_schema = 'public'
+  AND is_nullable = 'NO'
+ORDER BY table_name, ordinal_position
+
+*/ 
+
+-- Checking for any missing zip codes in  the patients
+
+SELECT first_name, last_name, zip_code
+FROM pat
+WHERE zip_code IS NULL
+
+-- Finding the cities that have lowercase values 
+
+
+SELECT first_name, last_name, city
+FROM pat
+WHERE city = LOWER(city)
+
+
+
+ /*The Data Dictionary identified 20 patients with intentionally duplicated
+demographic attributes. I checked first_name, last_name, and DOB to identify them.*/
+
+
+SELECT first_name, last_name, DOB,
+    COUNT(*) AS duplicate_count
+FROM pat
+GROUP BY first_name,last_name,DOB
+HAVING COUNT(*) > 1
+ 
+ -- Checking for any blank appointment IDs
+
+ SELECT *
+FROM encounters
+WHERE appointment_id IS NULL
+
+/*This shows that some encounters do not have an appointment_id. Based on the Data Dictionary, these are legitimate blank values because unscheduled encounters can occur without a corresponding appointment.*/
+
+-- Checking for medications that do not have end dates
+
+SELECT *
+FROM medications
+WHERE end_date IS NULL
+
+-- Are the zero paid amounts showing up in situations that make sense?
+
+SELECT claim_id, claim_status, paid_amount
+FROM claims
+WHERE paid_amount = 0
+
+-- After running the query above, I saw that there were paid claims with zero amounts, which I found suspicious.
+
+SELECT claim_id,  claim_status, billed_amount, allowed_amount,
+    paid_amount, pat_responsibility
+FROM claims
+WHERE claim_status = 'Paid'
+  AND paid_amount = 0
+
+/* After investigating, I found that some claims with a paid_amount of 0
+ had the full allowed_amount assigned to pat_responsibility.
+This indicates that the insurer paid $0 and the patient was responsible
+for the allowed amount, so these values are valid and should remain unchanged. */
