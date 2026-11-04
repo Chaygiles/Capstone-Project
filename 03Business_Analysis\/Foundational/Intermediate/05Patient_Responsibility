@@ -1,0 +1,408 @@
+
+/*
+========================================================
+QUESTION 5: PATIENT COLLECTIONS ANALYSIS
+========================================================
+
+BUSINESS QUESTION:
+Measure how much patient responsibility is actually
+collected by the healthcare organization.
+
+OBJECTIVE:
+Determine how much patients are responsible for,
+how much has been collected, and how much remains
+outstanding.
+
+APPROACH:
+1. Examine patient claims and payment records.
+2. Calculate total payments received from patients.
+3. Calculate total claims and patient responsibility.
+4. Join the aggregated results to compare patient
+   responsibility against actual collections.
+5. Calculate outstanding balances and collection rates.
+6. Aggregate the results to measure overall collections.
+7. Validate the financial totals and payment records.
+
+CTEs are used to separate each calculation, organize
+the analysis, and avoid duplicating financial amounts
+when combining claims and payments.
+
+========================================================
+*/
+
+
+/*
+========================================================
+PART 1: DATA EXPLORATION
+========================================================
+
+I started by examining the patient, claims, and
+payments tables to identify the columns needed
+for the analysis.
+
+The claims table contains pat_responsibility,
+which identifies how much the patient owes.
+
+The payments table contains payment_source,
+which identifies whether a payment came from
+the patient or the insurance company.
+
+I also examined the payment amounts to determine
+how much was actually collected from patients.
+
+========================================================
+*/
+
+
+/*
+-- Identify patient IDs.
+
+SELECT DISTINCT
+    patid
+FROM pat
+ORDER BY patid ASC;
+*/
+
+
+/*
+-- Examine billed amounts, payments, and patient
+-- responsibility for each claim.
+
+SELECT
+    patid,
+    claim_id,
+    billed_amount,
+    paid_amount,
+    pat_responsibility
+FROM claims
+ORDER BY patid ASC;
+*/
+
+
+/*
+-- Identify payments received directly from patients.
+-- Insurance payments are excluded from this analysis.
+
+SELECT
+    patid,
+    payment_id,
+    claim_id,
+    payment_source,
+    amount
+FROM payments
+WHERE payment_source = 'Patient'
+ORDER BY patid ASC;
+*/
+
+
+/*
+========================================================
+PART 2: PATIENT COLLECTIONS ANALYSIS
+========================================================
+
+I created four CTEs to calculate patient payments,
+total responsibility, outstanding balances,
+and collection percentages.
+
+I aggregated the claims and payments separately
+before joining them to prevent duplicate amounts
+from affecting the financial totals.
+
+========================================================
+*/
+
+WITH Tot_Pat_Pay AS (
+
+    /*
+    CTE 1: TOTAL PATIENT PAYMENTS
+
+    Calculate how much each patient has paid.
+
+    SUM(amount) combines the patient's payment records
+    into one total.
+
+    The WHERE condition excludes insurance payments.
+    GROUP BY patid returns one record per patient.
+    */
+
+    SELECT
+        patid,
+        SUM(amount) AS total_paid
+    FROM payments
+    WHERE payment_source = 'Patient'
+    GROUP BY patid
+
+),
+
+Tot_Claims AS (
+
+    /*
+    CTE 2: TOTAL CLAIMS AND PATIENT RESPONSIBILITY
+
+    Calculate each patient's total claims, billed
+    amounts, and financial responsibility.
+
+    COUNT(DISTINCT claim_id) counts unique claims.
+
+    SUM(pat_responsibility) calculates the total
+    amount the patient is responsible for paying.
+
+    GROUP BY patid returns one record per patient.
+    */
+
+    SELECT
+        patid,
+        COUNT(DISTINCT claim_id) AS tot_claims,
+        SUM(billed_amount) AS total_billed,
+        SUM(pat_responsibility) AS total_responsibility
+    FROM claims
+    GROUP BY patid
+
+),
+
+Pat_Collected AS (
+
+    /*
+    CTE 3: COMBINE CLAIMS AND PATIENT PAYMENTS
+
+    Join the aggregated claims and payments using patid.
+
+    LEFT JOIN keeps patients who have claims but
+    have not made any payments.
+
+    COALESCE replaces missing payment totals (NULL)
+    with 0 so those patients remain in the analysis.
+
+    Joining the aggregated CTEs also prevents
+    individual payment records from duplicating
+    claim amounts.
+    */
+
+    SELECT
+        tc.patid,
+        tc.tot_claims,
+        tc.total_billed,
+        tc.total_responsibility,
+        COALESCE(pp.total_paid, 0) AS total_collected
+    FROM Tot_Claims tc
+    LEFT JOIN Tot_Pat_Pay pp
+        ON tc.patid = pp.patid
+
+),
+
+Collection_Rate AS (
+
+    /*
+    CTE 4: OUTSTANDING BALANCES AND COLLECTION RATES
+
+    Calculate how much each patient still owes
+    and the percentage of their responsibility
+    that has been collected.
+
+    Outstanding balance:
+        Total Responsibility - Total Collected
+
+    Collection rate:
+        Total Collected / Total Responsibility * 100
+
+    NULLIF prevents division by zero for patients
+    whose total responsibility is 0.
+
+    ROUND displays the collection percentage
+    to two decimal places.
+    */
+
+    SELECT
+        pc.patid,
+        pc.tot_claims,
+        pc.total_billed,
+        pc.total_responsibility,
+        pc.total_collected,
+
+        pc.total_responsibility - pc.total_collected
+            AS outstanding_balance,
+
+        ROUND(
+            pc.total_collected * 100.0 /
+            NULLIF(pc.total_responsibility, 0),
+            2
+        ) AS collection_rate_pct
+
+    FROM Pat_Collected pc
+
+)
+
+/*
+========================================================
+PART 3: FINAL AGGREGATE RESULTS
+========================================================
+
+I used the Collection_Rate CTE to calculate the
+overall financial totals across all patients.
+
+SUM() combines each patient's responsibility,
+collections, and outstanding balances.
+
+The overall collection rate is calculated using
+total dollars collected divided by total dollars
+owed, rather than averaging individual rates.
+
+========================================================
+*/
+
+SELECT
+    SUM(total_responsibility) AS overall_responsibility,
+    SUM(total_collected) AS overall_collected,
+    SUM(outstanding_balance) AS overall_outstanding,
+
+    ROUND(
+        SUM(total_collected) * 100.0 /
+        NULLIF(SUM(total_responsibility), 0),
+        2
+    ) AS collection_rate_pct
+
+FROM Collection_Rate;
+
+
+/*
+========================================================
+PART 4: PATIENT-LEVEL RESULTS
+========================================================
+
+This query displays each patient's financial totals,
+outstanding balance, and collection percentage.
+
+It allows me to identify patients with higher
+outstanding balances or lower collection rates.
+
+To run this query, replace the final SELECT above
+with the SELECT below while keeping all four CTEs.
+
+SELECT *
+FROM Collection_Rate
+ORDER BY tot_claims DESC;
+
+========================================================
+*/
+
+
+/*
+========================================================
+PART 5: FINANCIAL VALIDATION
+========================================================
+
+VALIDATION 1: NEGATIVE OUTSTANDING BALANCES
+
+Check whether any patient has paid more than
+their total recorded responsibility.
+
+A negative outstanding balance could indicate
+an overpayment or a potential data discrepancy.
+
+Run this SELECT in place of the final SELECT
+while keeping the four CTEs above.
+
+SELECT *
+FROM Collection_Rate
+WHERE outstanding_balance < 0
+ORDER BY outstanding_balance ASC;
+
+RESULT:
+0 records returned.
+
+No negative outstanding balances were identified
+at the patient level.
+
+========================================================
+*/
+
+
+/*
+========================================================
+VALIDATION 2: PAYMENT AND CLAIM RELATIONSHIPS
+========================================================
+
+Validate that patient payments reference a matching
+claim belonging to the same patient.
+
+LEFT JOIN retains patient payment records even
+when no matching claim is found.
+
+The WHERE condition identifies unmatched records.
+
+COUNT(*) determines how many payment records
+do not have a matching claim.
+
+SUM(p.amount) determines the total payment amount
+associated with those unmatched records.
+
+This is a standalone query and can be run separately
+from the four CTEs.
+
+SELECT
+    COUNT(*) AS unmatched_payments,
+    COALESCE(SUM(p.amount), 0) AS unmatched_amount
+FROM payments p
+LEFT JOIN claims c
+    ON p.claim_id = c.claim_id
+    AND p.patid = c.patid
+WHERE p.payment_source = 'Patient'
+    AND c.claim_id IS NULL;
+
+RESULT:
+Unmatched Payments: 0
+Unmatched Amount: $0.00
+
+All patient payment records have a matching
+claim and patient ID.
+
+========================================================
+*/
+
+
+/*
+========================================================
+PART 6: FINAL BUSINESS RESULTS
+========================================================
+
+Total Patient Responsibility: $2,308,289.67
+
+Total Patient Collections:   $1,320,580.70
+
+Outstanding Patient Balance:   $987,708.97
+
+Overall Collection Rate:            57.21%
+
+Outstanding Percentage:             42.79%
+
+
+BUSINESS FINDINGS:
+
+The healthcare organization recorded approximately
+$2.31 million in total patient responsibility.
+
+Of that amount, approximately $1.32 million has
+been collected, resulting in an overall collection
+rate of 57.21%.
+
+The remaining $987,708.97 represents 42.79% of
+patient responsibility that has not been collected.
+
+This identifies an opportunity for the organization
+to improve patient collections and reduce
+outstanding balances.
+
+The patient-level validation returned no negative
+outstanding balances, and all patient payment records
+matched an existing claim belonging to the same patient.
+
+The aggregate financial totals also reconcile:
+
+$2,308,289.67 - $1,320,580.70 = $987,708.97
+
+These findings could help the revenue cycle team
+identify collection gaps and prioritize accounts
+that may require additional follow-up.
+
+========================================================
+*/

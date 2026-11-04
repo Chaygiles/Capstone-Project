@@ -92,3 +92,8 @@ ALTER TABLE medications
 ADD CONSTRAINT medications_patid_fkey
 FOREIGN KEY (patid)
 REFERENCES pat(patid)
+
+-- Patient table
+
+ALTER TABLE pat
+RENAME COLUMN insurance_plan_id TO plan_id
