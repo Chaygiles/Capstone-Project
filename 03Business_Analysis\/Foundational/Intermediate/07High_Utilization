@@ -1,0 +1,96 @@
+
+/*
+========================================================
+QUESTION 7: HIGH-UTILIZATION PATIENT ANALYSIS
+========================================================
+
+BUSINESS QUESTION:
+Identify patients with the most encounters and determine
+which diagnosis categories they have in common.
+
+OBJECTIVE:
+Rank patients by encounter volume and identify the most
+common diagnosis categories among high-utilization patients.
+
+APPROACH:
+1. Count the total encounters for each patient.
+2. Rank patients by encounter volume.
+3. Identify diagnosis categories for the highest-ranked patients.
+4. Calculate diagnosis-related visits and determine how many
+   patients share each diagnosis category.
+
+========================================================
+*/
+
+
+/*
+========================================================
+CTE 1: PATIENT VISITS
+========================================================
+
+Count distinct encounters for each patient to establish
+their total visit volume.
+
+========================================================
+*/
+
+WITH Patient_Visits AS (
+    SELECT patid,
+        COUNT(DISTINCT encounter_id) AS total_visits
+    FROM encounters
+    GROUP BY patid
+),
+
+
+/*
+========================================================
+CTE 2: HIGH UTILIZATION
+========================================================
+
+Rank patients from highest to lowest encounter volume.
+DENSE_RANK assigns the same rank to patients with
+equal visit counts without skipping ranking positions.
+
+========================================================
+*/
+
+High_Utilization AS (
+    SELECT patid, total_visits,
+        DENSE_RANK() OVER (
+            ORDER BY total_visits DESC
+        ) AS visit_rank
+    FROM Patient_Visits
+)
+
+
+/*
+========================================================
+FINAL ANALYSIS: COMMON DIAGNOSES
+========================================================
+
+Join ranked patients to encounters and diagnoses.
+
+- Filter patients to the top 10 visit-count rankings.
+- Count distinct encounters for each diagnosis category.
+- Count how many selected patients share each category.
+- Sort by patient rank and diagnosis-related visit volume.
+
+NOTE:
+The top 10 rankings may include more than 10 patients
+because DENSE_RANK includes ties.
+
+========================================================
+*/
+
+SELECT h.patid, h.total_visits, h.visit_rank,
+    d.diagnosis_category,
+    COUNT(DISTINCT e.encounter_id) AS diagnosis_visits,
+    COUNT(*) OVER (
+        PARTITION BY d.diagnosis_category
+    ) AS patients_sharing_diagnosis
+FROM High_Utilization h
+INNER JOIN encounters e ON h.patid = e.patid
+INNER JOIN diagnoses d ON e.encounter_id = d.encounter_id
+WHERE h.visit_rank <= 10
+GROUP BY h.patid, h.total_visits, h.visit_rank, d.diagnosis_category
+ORDER BY h.visit_rank, h.patid, diagnosis_visits DESC;
