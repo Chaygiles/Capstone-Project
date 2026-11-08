@@ -1,25 +1,75 @@
--- Repair diagnoses.encounter_id from the ORIGINAL diagnoses.csv in the provided ZIP.
--- Existing table and column names are preserved. No diagnosis IDs are regenerated.
--- This script changes ONLY diagnoses.encounter_id (and adds that column if it is absent).
--- Before execution: confirm that diagnoses and encounters have been imported.
--- Execute this WHOLE FILE in PostgreSQL / pgAdmin Query Tool.
--- Uses plain SQL (no DO blocks or $$ delimiters).
--- All checks occur within a transaction: if they fail, the changes are not committed.
--- On an error, run ROLLBACK; before trying again.
+/*
+========================================================
+DATA REPAIR: DIAGNOSIS-TO-ENCOUNTER RELATIONSHIP
+========================================================
 
+BUSINESS PROBLEM:
+The diagnoses table was imported without populated
+encounter_id values, preventing encounter-level
+analysis of patient diagnoses.
+
+OBJECTIVE:
+Restore the original diagnosis-to-encounter mapping
+without modifying diagnosis IDs or clinical details.
+
+APPROACH:
+1. Add diagnoses.encounter_id if it is missing.
+2. Load the supplied diagnosis ID, encounter ID, and
+   ICD-10 mapping into a temporary table.
+3. Verify that every diagnosis and ICD-10 code matches
+   the mapping and every encounter ID exists.
+4. Populate diagnoses.encounter_id for matching rows.
+5. Recheck the mapping before committing the repair.
+6. Review the record counts and a sample of results.
+
+TABLES USED:
+- diagnoses: existing diagnosis records to repair
+- encounters: verifies each referenced encounter exists
+- _diagnoses_encounter_mapping: temporary source mapping
+- _diagnoses_repair_check: temporary validation results
+
+IMPORTANT NOTES:
+- Run the entire script in pgAdmin after importing both
+  diagnoses and encounters.
+- The mapping below reproduces the original repair
+  script's 14,989 diagnosis records; source CSV was not
+  separately verified during this documentation cleanup.
+- Only the encounter_id column is added/updated.
+- No diagnosis IDs are regenerated or records deleted.
+- If a validation check fails, the transaction aborts.
+  Run ROLLBACK before retrying.
+- This repair does not create a permanent foreign key.
+
+EXPECTED VALIDATION:
+Total diagnoses:            14,989
+Populated encounter IDs:    14,989
+Invalid encounter IDs:      0
+
+========================================================
+*/
+
+-- SECTION 1: START TRANSACTION AND PREPARE TABLES
+-- Changes remain uncommitted until all in-transaction checks pass.
 BEGIN;
 
--- The original CSV already contains encounter_id; the database table may be missing it.
-ALTER TABLE diagnoses ADD COLUMN IF NOT EXISTS encounter_id INTEGER;
+-- Add the missing relationship column only if it does not exist.
+ALTER TABLE diagnoses
+ADD COLUMN IF NOT EXISTS encounter_id INTEGER;
 
--- Session-only mapping table; automatically discarded on COMMIT.
+-- Store the source mappings for this transaction only.
+-- PRIMARY KEY prevents duplicate diagnosis IDs within the mapping.
 CREATE TEMP TABLE _diagnoses_encounter_mapping (
     diagnosis_id INTEGER PRIMARY KEY,
     encounter_id INTEGER NOT NULL,
     icd10_code TEXT NOT NULL
 ) ON COMMIT DROP;
 
--- Exact mappings taken from the uploaded diagnoses.csv.
+
+-- SECTION 2: LOAD ORIGINAL DIAGNOSIS-TO-ENCOUNTER MAPPINGS
+-- Each row is (diagnosis_id, encounter_id, icd10_code).
+-- Keep these values unchanged to preserve the original relationships.
+
+-- Mapping batch 01: diagnosis IDs 1-850
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (1, 1, 'F41.1'),
@@ -873,6 +923,7 @@ VALUES
     (849, 496, 'R07.9'),
     (850, 497, 'J06.9');
 
+-- Mapping batch 02: diagnosis IDs 851-1700
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (851, 497, 'J45.909'),
@@ -1726,6 +1777,7 @@ VALUES
     (1699, 985, 'J06.9'),
     (1700, 986, 'R06.02');
 
+-- Mapping batch 03: diagnosis IDs 1701-2550
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (1701, 987, 'G43.909'),
@@ -2579,6 +2631,7 @@ VALUES
     (2549, 1451, 'S93.409A'),
     (2550, 1452, 'F32.A');
 
+-- Mapping batch 04: diagnosis IDs 2551-3400
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (2551, 1452, 'F41.1'),
@@ -3432,6 +3485,7 @@ VALUES
     (3399, 1942, 'R07.9'),
     (3400, 1943, 'R06.02');
 
+-- Mapping batch 05: diagnosis IDs 3401-4250
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (3401, 1943, 'J06.9'),
@@ -4285,6 +4339,7 @@ VALUES
     (4249, 2422, 'E78.5'),
     (4250, 2423, 'J45.909');
 
+-- Mapping batch 06: diagnosis IDs 4251-5100
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (4251, 2423, 'R06.02'),
@@ -5138,6 +5193,7 @@ VALUES
     (5099, 2901, 'R10.9'),
     (5100, 2902, 'S93.409A');
 
+-- Mapping batch 07: diagnosis IDs 5101-5950
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (5101, 2902, 'J06.9'),
@@ -5991,6 +6047,7 @@ VALUES
     (5949, 3371, 'E11.9'),
     (5950, 3371, 'E66.9');
 
+-- Mapping batch 08: diagnosis IDs 5951-6800
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (5951, 3371, 'I10'),
@@ -6844,6 +6901,7 @@ VALUES
     (6799, 3859, 'N18.3'),
     (6800, 3859, 'E66.9');
 
+-- Mapping batch 09: diagnosis IDs 6801-7650
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (6801, 3860, 'F32.A'),
@@ -7697,6 +7755,7 @@ VALUES
     (7649, 4333, 'E11.9'),
     (7650, 4334, 'F32.A');
 
+-- Mapping batch 10: diagnosis IDs 7651-8500
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (7651, 4334, 'F41.1'),
@@ -8550,6 +8609,7 @@ VALUES
     (8499, 4817, 'R10.9'),
     (8500, 4818, 'J06.9');
 
+-- Mapping batch 11: diagnosis IDs 8501-9350
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (8501, 4819, 'E78.5'),
@@ -9403,6 +9463,7 @@ VALUES
     (9349, 5298, 'J06.9'),
     (9350, 5298, 'S93.409A');
 
+-- Mapping batch 12: diagnosis IDs 9351-10200
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (9351, 5298, 'G43.909'),
@@ -10256,6 +10317,7 @@ VALUES
     (10199, 5768, 'F32.A'),
     (10200, 5768, 'F41.1');
 
+-- Mapping batch 13: diagnosis IDs 10201-11050
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (10201, 5769, 'F41.1'),
@@ -11109,6 +11171,7 @@ VALUES
     (11049, 6259, 'R10.9'),
     (11050, 6259, 'R06.02');
 
+-- Mapping batch 14: diagnosis IDs 11051-11900
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (11051, 6260, 'R10.9'),
@@ -11962,6 +12025,7 @@ VALUES
     (11899, 6741, 'F41.1'),
     (11900, 6742, 'F41.1');
 
+-- Mapping batch 15: diagnosis IDs 11901-12750
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (11901, 6742, 'F32.A'),
@@ -12815,6 +12879,7 @@ VALUES
     (12749, 7217, 'R06.02'),
     (12750, 7218, 'I10');
 
+-- Mapping batch 16: diagnosis IDs 12751-13600
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (12751, 7219, 'F41.1'),
@@ -13668,6 +13733,7 @@ VALUES
     (13599, 7690, 'I10'),
     (13600, 7690, 'R06.02');
 
+-- Mapping batch 17: diagnosis IDs 13601-14450
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (13601, 7690, 'I50.9'),
@@ -14521,6 +14587,7 @@ VALUES
     (14449, 8188, 'R07.9'),
     (14450, 8188, 'G43.909');
 
+-- Mapping batch 18: diagnosis IDs 14451-14989
 INSERT INTO _diagnoses_encounter_mapping (diagnosis_id, encounter_id, icd10_code)
 VALUES
     (14451, 8188, 'S93.409A'),
@@ -15063,9 +15130,14 @@ VALUES
     (14988, 8477, 'S93.409A'),
     (14989, 8477, 'R07.9');
 
--- Safety check before changing any diagnosis values.
--- A failed CHECK constraint aborts the transaction, so the update cannot be committed.
--- Check that all original diagnosis IDs/ICD-10 codes match and that encounter IDs exist.
+
+-- SECTION 3: VALIDATE SOURCE MAPPINGS BEFORE UPDATE
+-- A FALSE result violates the CHECK constraint and aborts the transaction.
+-- Confirm that:
+--   a) Every diagnosis has an entry in the source mapping.
+--   b) Each diagnosis ID retains its original ICD-10 code.
+--   c) Every source mapping matches a diagnosis record.
+--   d) Every mapped encounter_id exists in encounters.
 CREATE TEMP TABLE _diagnoses_repair_check (
     is_valid BOOLEAN NOT NULL CHECK (is_valid)
 ) ON COMMIT DROP;
@@ -15075,64 +15147,72 @@ SELECT
     NOT EXISTS (
         SELECT 1
         FROM diagnoses AS d
-        LEFT JOIN _diagnoses_encounter_mapping AS m ON d.diagnosis_id = m.diagnosis_id
+        LEFT JOIN _diagnoses_encounter_mapping AS m
+            ON d.diagnosis_id = m.diagnosis_id
         WHERE m.diagnosis_id IS NULL
            OR d.icd10_code IS DISTINCT FROM m.icd10_code
     )
     AND NOT EXISTS (
         SELECT 1
         FROM _diagnoses_encounter_mapping AS m
-        LEFT JOIN diagnoses AS d ON d.diagnosis_id = m.diagnosis_id
+        LEFT JOIN diagnoses AS d
+            ON m.diagnosis_id = d.diagnosis_id
         WHERE d.diagnosis_id IS NULL
     )
     AND NOT EXISTS (
         SELECT 1
         FROM _diagnoses_encounter_mapping AS m
-        LEFT JOIN encounters AS e ON e.encounter_id = m.encounter_id
+        LEFT JOIN encounters AS e
+            ON m.encounter_id = e.encounter_id
         WHERE e.encounter_id IS NULL
     );
 
--- Fill the existing diagnoses records by matching their ORIGINAL diagnosis_id.
--- All other diagnoses columns remain untouched.
+
+-- SECTION 4: RESTORE ENCOUNTER IDS
+-- Match on diagnosis_id and change only encounter_id.
+-- IS DISTINCT FROM skips rows that already contain the correct value.
 UPDATE diagnoses AS d
 SET encounter_id = m.encounter_id
 FROM _diagnoses_encounter_mapping AS m
 WHERE d.diagnosis_id = m.diagnosis_id
   AND d.encounter_id IS DISTINCT FROM m.encounter_id;
 
--- Verify the updated values before committing (a failed check aborts the transaction).
+
+-- SECTION 5: RECHECK UPDATED VALUES
+-- Confirm that every saved diagnosis now has the expected encounter_id.
+-- Any mismatch aborts the transaction before COMMIT.
 INSERT INTO _diagnoses_repair_check (is_valid)
 SELECT NOT EXISTS (
     SELECT 1
     FROM diagnoses AS d
-    JOIN _diagnoses_encounter_mapping AS m ON m.diagnosis_id = d.diagnosis_id
+    JOIN _diagnoses_encounter_mapping AS m
+        ON d.diagnosis_id = m.diagnosis_id
     WHERE d.encounter_id IS DISTINCT FROM m.encounter_id
 );
 
+-- Save all changes only after validation succeeds.
 COMMIT;
 
--- Expected: total_diagnoses=14989, populated_encounter_ids=14989, invalid_encounter_ids=0.
+
+-- SECTION 6: POST-REPAIR VALIDATION
+-- Expected: 14,989 diagnoses, 14,989 populated IDs, 0 invalid IDs.
 SELECT
     COUNT(*) AS total_diagnoses,
     COUNT(d.encounter_id) AS populated_encounter_ids,
     COUNT(*) FILTER (WHERE e.encounter_id IS NULL) AS invalid_encounter_ids
 FROM diagnoses AS d
-LEFT JOIN encounters AS e ON e.encounter_id = d.encounter_id;
+LEFT JOIN encounters AS e
+    ON d.encounter_id = e.encounter_id;
 
--- Preview the repaired relationship.
-SELECT d.diagnosis_id, d.encounter_id,
-       d.icd10_code, d.diagnosis_category, d.primary_flag
+-- Preview 20 diagnosis records and their repaired encounter relationships.
+SELECT
+    d.diagnosis_id,
+    d.encounter_id,
+    d.icd10_code,
+    d.diagnosis_category,
+    d.primary_flag
 FROM diagnoses AS d
-JOIN encounters AS e ON e.encounter_id = d.encounter_id
+JOIN encounters AS e
+    ON d.encounter_id = e.encounter_id
 ORDER BY d.diagnosis_id
 LIMIT 20;
-
-/*
-Validating the changes to the diagnoses table. The total number of diagnoses should match the number of populated encounter IDs, and there should be no missing encounter IDs.
-*/
-SELECT
-    COUNT(*) AS total_diagnoses,
-    COUNT(encounter_id) AS populated_encounter_ids,
-    COUNT(*) - COUNT(encounter_id) AS missing_encounter_ids
-FROM diagnoses
-*/

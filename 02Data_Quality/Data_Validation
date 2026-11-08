@@ -1,10 +1,41 @@
+
 /*
-I am now validating the data that was imported into the database
-and comparing it with the expected information in the Data Dictionary.
+========================================================
+DATA VALIDATION - HEALTHCARE DATABASE
+========================================================
+
+OBJECTIVE:
+Validate the imported healthcare data against the
+Data Dictionary to identify missing values, duplicate
+records, inconsistent formatting, and potential
+financial discrepancies.
+
+APPROACH:
+1. Verify imported row counts.
+2. Check missing values and table relationships.
+3. Identify inconsistent patient information.
+4. Investigate potential duplicate patients.
+5. Validate missing encounter and medication data.
+6. Review claims with zero payment amounts.
+
+========================================================
 */
 
 
--- Row count validation
+/*
+========================================================
+1. ROW COUNT VALIDATION
+========================================================
+
+Compare the total number of records in each table
+against the expected counts in the Data Dictionary.
+
+UNION ALL combines the individual table counts into
+one result without removing any rows.
+
+ORDER BY sorts the results alphabetically for
+easier comparison.
+*/
 
 SELECT 'departments' AS table_name, COUNT(*) AS row_count FROM departments
 UNION ALL
@@ -27,110 +58,262 @@ UNION ALL
 SELECT 'claims', COUNT(*) FROM claims
 UNION ALL
 SELECT 'payments', COUNT(*) FROM payments
-ORDER BY table_name ASC
-
-
--- Row count validation:
--- The number of records imported into each table matches the expected
--- row counts listed in the Data Dictionary.
-
--- ORDER BY table_name ASC was added so the results appear in the same
--- order as the Data Dictionary for easier comparison.
-
-
-
-
--- NULL validation
-
---NULL Validations
-
-SELECT e.appointment_id, a.appointment_id
-FROM encounters e 
-LEFT JOIN appointments a
-	ON e.appointment_id = a.appointment_id
-WHERE (e.appointment_id, a.appointment_id) IS NULL
-
+ORDER BY table_name ASC;
 
 /*
-I began the NULL validation process by checking for missing values through individual table queries and JOINs. 
-While this approach works, I recognized that repeating the same process across every table and required column would be inefficient and difficult to scale.
+FINDINGS:
+All 11 tables matched the expected row counts
+documented in the Data Dictionary.
 
-To make the validation process more efficient, I researched PostgreSQL metadata and learned to use information_schema to identify columns defined as NOT NULL. 
-This lets me compare the database structure against the Data Dictionary and focus my validation on columns expected to contain values.
+This confirms the expected number of records was
+imported, although additional validation is needed
+to verify data quality.
 */
 
 
-/* NULL VALIDATION - REQUIRED COLUMNS 
+/*
+========================================================
+2. NULL VALIDATION - TABLE RELATIONSHIPS
+========================================================
 
-I will be removing this from the capstone itself because I realized, while reviewing the Data Dictionary, which tables were already NULL and NOT NULL.
+Check whether encounters reference appointment IDs
+that do not exist in the appointments table.
+
+LEFT JOIN preserves all encounters, while the
+WHERE clause identifies unmatched appointment IDs.
+
+Encounters with NULL appointment IDs are excluded
+because unscheduled encounters are allowed.
+*/
+
+SELECT e.encounter_id, e.appointment_id
+FROM encounters e
+LEFT JOIN appointments a
+    ON e.appointment_id = a.appointment_id
+WHERE e.appointment_id IS NOT NULL
+    AND a.appointment_id IS NULL;
 
 
-SELECT
-    table_name,
-    column_name,
-    data_type,
-    is_nullable
-FROM information_schema.columns
-WHERE table_schema = 'public'
-  AND is_nullable = 'NO'
-ORDER BY table_name, ordinal_position
+/*
+========================================================
+3. PATIENT DATA - MISSING ZIP CODES
+========================================================
 
-*/ 
-
--- Checking for any missing zip codes in  the patients
+Identify patient records with missing ZIP codes
+to determine whether demographic information
+requires cleaning.
+*/
 
 SELECT first_name, last_name, zip_code
 FROM pat
-WHERE zip_code IS NULL
+WHERE zip_code IS NULL;
 
--- Finding the cities that have lowercase values 
+/*
+FINDINGS:
+13 patient records contained NULL ZIP codes.
 
+These records were identified for correction
+during the data cleaning process.
+*/
+
+
+/*
+========================================================
+4. PATIENT DATA - INCONSISTENT CITY FORMATTING
+========================================================
+
+Identify city names stored entirely in lowercase.
+
+Inconsistent capitalization can cause the same
+city to appear as separate values when grouping
+or filtering data.
+*/
 
 SELECT first_name, last_name, city
 FROM pat
 WHERE city = LOWER(city)
+    AND city <> UPPER(city);
+
+/*
+FINDINGS:
+Patient records contained inconsistent city
+capitalization.
+
+These values were identified for standardization
+during data cleaning.
+*/
 
 
+/*
+========================================================
+5. PATIENT DATA - POTENTIAL DUPLICATE RECORDS
+========================================================
 
- /*The Data Dictionary identified 20 patients with intentionally duplicated
-demographic attributes. I checked first_name, last_name, and DOB to identify them.*/
+The Data Dictionary identified 20 intentionally
+duplicated patient records.
 
+Group patients by first name, last name, and DOB
+to identify demographic combinations that appear
+more than once.
 
-SELECT first_name, last_name, DOB,
+HAVING COUNT(*) > 1 returns potential duplicates
+for further investigation.
+*/
+
+SELECT first_name, last_name, dob,
     COUNT(*) AS duplicate_count
 FROM pat
-GROUP BY first_name,last_name,DOB
+GROUP BY first_name, last_name, dob
 HAVING COUNT(*) > 1
- 
- -- Checking for any blank appointment IDs
+ORDER BY last_name;
 
- SELECT *
+/*
+FINDINGS:
+Multiple patient records shared identical names
+and dates of birth.
+
+Matching demographic information alone does not
+confirm that records belong to the same patient.
+
+Additional attributes must be reviewed before
+removing duplicates to avoid deleting legitimate
+patient records.
+*/
+
+
+/*
+========================================================
+6. ENCOUNTERS - MISSING APPOINTMENT IDS
+========================================================
+
+Identify encounters without an appointment ID
+and determine whether the missing values are
+valid according to the Data Dictionary.
+*/
+
+SELECT *
 FROM encounters
-WHERE appointment_id IS NULL
+WHERE appointment_id IS NULL;
 
-/*This shows that some encounters do not have an appointment_id. Based on the Data Dictionary, these are legitimate blank values because unscheduled encounters can occur without a corresponding appointment.*/
+/*
+FINDINGS:
+Some encounters contained NULL appointment IDs.
 
--- Checking for medications that do not have end dates
+The Data Dictionary confirms these are legitimate
+because unscheduled encounters can occur without
+a corresponding appointment.
+
+No correction is required.
+*/
+
+
+/*
+========================================================
+7. MEDICATIONS - MISSING END DATES
+========================================================
+
+Identify medications without an end date to
+review whether the missing values represent
+ongoing medication records.
+*/
 
 SELECT *
 FROM medications
-WHERE end_date IS NULL
+WHERE end_date IS NULL;
 
--- Are the zero paid amounts showing up in situations that make sense?
+/*
+VALIDATION NOTE:
+A NULL end_date does not necessarily indicate
+missing or incorrect data.
+
+These records should be reviewed to determine
+whether they represent active or ongoing
+medications before making changes.
+*/
+
+
+/*
+========================================================
+8. CLAIMS - ZERO PAYMENT VALIDATION
+========================================================
+
+Identify claims with a paid_amount of zero
+and review their corresponding claim statuses.
+
+A zero payment may represent a valid financial
+outcome or a potential data quality issue.
+*/
 
 SELECT claim_id, claim_status, paid_amount
 FROM claims
-WHERE paid_amount = 0
+WHERE paid_amount = 0;
 
--- After running the query above, I saw that there were paid claims with zero amounts, which I found suspicious.
 
-SELECT claim_id,  claim_status, billed_amount, allowed_amount,
-    paid_amount, pat_responsibility
+/*
+Further investigation revealed claims marked
+as 'Paid' despite having a paid_amount of zero.
+
+Review the billed, allowed, and patient
+responsibility amounts to understand why.
+*/
+
+SELECT claim_id, claim_status, billed_amount,
+    allowed_amount, paid_amount, pat_responsibility
 FROM claims
 WHERE claim_status = 'Paid'
-  AND paid_amount = 0
+    AND paid_amount = 0;
 
-/* After investigating, I found that some claims with a paid_amount of 0
- had the full allowed_amount assigned to pat_responsibility.
-This indicates that the insurer paid $0 and the patient was responsible
-for the allowed amount, so these values are valid and should remain unchanged. */
+/*
+FINDINGS:
+Some claims marked as 'Paid' had an insurer
+paid_amount of zero.
+
+Further investigation showed that the full
+allowed_amount was assigned to pat_responsibility.
+
+This indicates that the insurer owed no payment
+and the patient was responsible for the allowed
+amount.
+
+The zero payment amounts are valid for these
+records and should remain unchanged.
+*/
+
+
+/*
+========================================================
+DATA VALIDATION SUMMARY
+========================================================
+
+1. ROW COUNTS:
+   All 11 tables matched the expected record counts.
+
+2. MISSING PATIENT DATA:
+   Identified 13 NULL ZIP codes requiring review.
+
+3. INCONSISTENT FORMATTING:
+   Identified city capitalization inconsistencies.
+
+4. DUPLICATE PATIENTS:
+   Identified potential duplicate patient records
+   requiring further demographic verification.
+
+5. ENCOUNTER RECORDS:
+   Confirmed that NULL appointment IDs are valid
+   for unscheduled encounters.
+
+6. MEDICATION RECORDS:
+   Reviewed missing medication end dates to
+   distinguish ongoing treatments from errors.
+
+7. FINANCIAL VALIDATION:
+   Investigated zero-paid claims and confirmed
+   that some reflected valid patient responsibility.
+
+NEXT STEP:
+Address confirmed data quality issues in the
+Data Cleaning script while preserving legitimate
+NULL values and financial records.
+
+========================================================
+*/

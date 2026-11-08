@@ -1,72 +1,69 @@
-/* I created the healthcare DB to showcase my knowledge
-Below, I am creating the necessary tables for the capstone project
+
+/*
+========================================================
+HEALTHCARE CAPSTONE PROJECT: DATABASE SCHEMA
+========================================================
+
+BUSINESS PURPOSE:
+Design a relational healthcare database to support
+analysis of patient visits, provider performance,
+appointments, diagnoses, insurance claims, payments,
+and hospital revenue.
+
+OBJECTIVE:
+Demonstrate PostgreSQL database development skills,
+including table creation, data types, primary keys,
+foreign keys, and schema modifications.
+
+APPROACH:
+1. Create department and insurance reference tables.
+2. Create patient and provider tables.
+3. Create appointment and encounter tables.
+4. Create clinical tables for diagnoses, procedures,
+   and medications.
+5. Create financial tables for claims and payments.
+6. Add remaining foreign key relationships.
+7. Modify column constraints and data types to
+   accommodate the healthcare dataset.
+
+NOTE:
+This script is intended for a new, empty database.
+Schema changes made during the original development
+process are retained to demonstrate ALTER TABLE.
+
+========================================================
+SECTION 1: CREATE DATABASE TABLES
+========================================================
 */
 
---APPOINTMENTS TABLE
 
-CREATE TABLE appointments (
-	appointment_id INT PRIMARY KEY,
-	--patid INT FOREIGN KEY REFERENCES pat(patid),
-	--provider_id INT FOREIGN KEY REFERENCES providers(provider_id),
-	scheduled_date DATE NOT NULL,
-	appointment_date DATE NOT NULL,
-	appointment_type VARCHAR(20) NOT NULL,
-	status VARCHAR(10) NOT NULL,
-	wait_days INT NOT NULL
-	
-)
+/*
+========================================================
+1. DEPARTMENTS
+========================================================
+Stores hospital department names and specialties.
 
---CLAIMS TABLE
+Each department can have multiple providers
+and patient encounters.
+*/
 
-CREATE TABLE claims (
-	claim_id INT PRIMARY KEY,
-	--encounter_id INT FOREIGN KEY REFERENCES encounter(encounter_id)NOT NULL,
-	--patid INT FOREIGN KEY REFERENCES pat(patid) NOT NULL,
-	--plan_id INT FOREIGN KEY REFERENCES plans(plan_id)NOT NULL,
-	claim_date DATE NOT NULL,
-	billed_amount NUMERIC(12,2) NOT NULL,
-	allowed_amount NUMERIC(12,2) NOT NULL,
-	paid_amount NUMERIC(12,2) NOT NULL,
-	pat_responsibility NUMERIC(12,2) NOT NULL,
-	claim_status VARCHAR(10) NOT NULL,
-	processing_days INT NOT NULL
-)
+CREATE TABLE departments (
+    department_id INT PRIMARY KEY,
+    department_name VARCHAR(20) NOT NULL,
+    specialty_group VARCHAR(20) NOT NULL
+);
 
 
+/*
+========================================================
+2. INSURANCE PLANS
+========================================================
+Stores insurance companies, plan information,
+deductibles, and coinsurance percentages.
 
-CREATE TABLE departments(
-	department_id INT PRIMARY KEY,
-	department_name VARCHAR(20) NOT NULL,
-	specialty_group VARCHAR(20) NOT NULL
-)
-	--DIAGNOSIS TABLE
-
-CREATE TABLE diagnosis(
-	diagnosis_id INT PRIMARY KEY,
-	department_name VARCHAR(20) NOT NULL,
-	icd10_code VARCHAR(20) NOT NULL,
-	diagnosis_description VARCHAR(20) NOT NULL,
-	diagnosis_category VARCHAR(20) NOT NULL,
-	primary_flag VARCHAR(20) NOT NULL
-	
-)
-	-- ENCOUNTERS TABLE
-	
-CREATE TABLE encounters (
-    encounter_id INT PRIMARY KEY,
-    department_id INT NOT NULL REFERENCES departments(department_id),
-    appointment_id INT NOT NULL REFERENCES appointments(appointment_id),
-    encounter_date DATE NOT NULL,
-    encounter_type VARCHAR(10) NOT NULL,
-    admit_source VARCHAR(20) NOT NULL,
-    discharge_status VARCHAR(20) NOT NULL,
-    stay_days INT NOT NULL,
-    total_charge NUMERIC(12,2) NOT NULL
-	--provider_id INT FOREIGN KEY REFERENCES provider(provider_id)NOT NULL,
-	--patid INT NOT NULL REFERENCES pat(patid),
-)
-
--- INSURANCE TABLE
+Insurance plans are referenced by patients
+and claims.
+*/
 
 CREATE TABLE insurance_plans (
     plan_id INT PRIMARY KEY,
@@ -75,26 +72,18 @@ CREATE TABLE insurance_plans (
     plan_type VARCHAR(20) NOT NULL,
     deductible NUMERIC(10,2) NOT NULL,
     coinsurance_pct NUMERIC(5,4) NOT NULL
-)
-
--- MEDICATIONS TABLE 
-
-CREATE TABLE medications (
-    medorder_id INT PRIMARY KEY,
-    encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
-   -- patid INT NOT NULL REFERENCES pat(patid),
-    med_name VARCHAR(50) NOT NULL,
-    med_class VARCHAR(50) NOT NULL,
-    dose VARCHAR(20) NOT NULL,
-    route VARCHAR(20) NOT NULL,
-    start_date DATE NOT NULL,
-    end_date DATE
-)
+);
 
 
+/*
+========================================================
+3. PATIENTS
+========================================================
+Stores patient demographics, insurance coverage,
+registration dates, and active status.
 
-
---PATIENT TABLE 
+Each patient references an insurance plan.
+*/
 
 CREATE TABLE pat (
     patid INT PRIMARY KEY,
@@ -105,93 +94,310 @@ CREATE TABLE pat (
     city VARCHAR(50) NOT NULL,
     state VARCHAR(2) NOT NULL,
     zip_code VARCHAR(10),
-    insurance_plan_id INT NOT NULL REFERENCES insurance_plans(plan_id),
+    insurance_plan_id INT NOT NULL
+        REFERENCES insurance_plans(plan_id),
     registration_date DATE NOT NULL,
     active_flag VARCHAR(1) NOT NULL
-)
+);
 
 
---PAYMENTS TABLE 
+/*
+========================================================
+4. PROVIDERS
+========================================================
+Stores healthcare provider information, credentials,
+department assignments, and employment status.
 
-CREATE TABLE payments (
-    payment_id INT PRIMARY KEY,
-    claim_id INT NOT NULL REFERENCES claims(claim_id),
-    patid INT NOT NULL REFERENCES pat(patid),
-    payment_date DATE NOT NULL,
-    payment_source VARCHAR(20) NOT NULL,
-    amount NUMERIC(12,2) NOT NULL,
-    payment_method VARCHAR(20) NOT NULL
-)
-
---PROCEDURES TABLE 
-
-CREATE TABLE procedures (
-    procedure_id INT PRIMARY KEY,
-    encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
-    cpt_code VARCHAR(10) NOT NULL,
-    procedure_description VARCHAR(100) NOT NULL,
-    procedure_category VARCHAR(50) NOT NULL,
-    procedure_charge NUMERIC(12,2) NOT NULL
-)
-
---PROVIDERS TABLE 
+Each provider belongs to a department.
+*/
 
 CREATE TABLE providers (
     provider_id INT PRIMARY KEY,
     first_name VARCHAR(50) NOT NULL,
     last_name VARCHAR(50) NOT NULL,
     credential VARCHAR(10) NOT NULL,
-    department_id INT NOT NULL REFERENCES departments(department_id),
+    department_id INT NOT NULL
+        REFERENCES departments(department_id),
     hire_date DATE NOT NULL,
     employment_status VARCHAR(20) NOT NULL
-)
+);
 
 
+/*
+========================================================
+5. APPOINTMENTS
+========================================================
+Stores scheduled appointments, appointment types,
+attendance status, and waiting periods.
 
-/* 
-I initially created the tables below without its foreign keys
-because they referenced tables that had not been created yet.
-Now that those tables exist, I am adding the columns and relationships.
+Patient and provider relationships are added
+in Section 2 using ALTER TABLE.
 */
 
---APPOINTMENTS TABLE
+CREATE TABLE appointments (
+    appointment_id INT PRIMARY KEY,
+    scheduled_date DATE NOT NULL,
+    appointment_date DATE NOT NULL,
+    appointment_type VARCHAR(20) NOT NULL,
+    status VARCHAR(10) NOT NULL,
+    wait_days INT NOT NULL
+);
+
+
+/*
+========================================================
+6. ENCOUNTERS
+========================================================
+Stores actual patient encounters, including
+admission information, discharge status,
+length of stay, and charges.
+
+Each encounter belongs to a department.
+
+Patient and provider relationships are added
+in Section 2 using ALTER TABLE.
+*/
+
+CREATE TABLE encounters (
+    encounter_id INT PRIMARY KEY,
+    department_id INT NOT NULL
+        REFERENCES departments(department_id),
+    appointment_id INT NOT NULL
+        REFERENCES appointments(appointment_id),
+    encounter_date DATE NOT NULL,
+    encounter_type VARCHAR(10) NOT NULL,
+    admit_source VARCHAR(20) NOT NULL,
+    discharge_status VARCHAR(20) NOT NULL,
+    stay_days INT NOT NULL,
+    total_charge NUMERIC(12,2) NOT NULL
+);
+
+
+/*
+========================================================
+7. DIAGNOSES
+========================================================
+Stores diagnosis codes, descriptions, categories,
+and primary diagnosis indicators.
+
+The encounter relationship is added in Section 2
+to support diagnosis analysis by patient visit.
+*/
+
+CREATE TABLE diagnoses (
+    diagnosis_id INT PRIMARY KEY,
+    department_name VARCHAR(20) NOT NULL,
+    icd10_code VARCHAR(20) NOT NULL,
+    diagnosis_description VARCHAR(20) NOT NULL,
+    diagnosis_category VARCHAR(20) NOT NULL,
+    primary_flag VARCHAR(20) NOT NULL
+);
+
+
+/*
+========================================================
+8. PROCEDURES
+========================================================
+Stores medical procedures performed during
+patient encounters, including CPT codes,
+procedure categories, and associated charges.
+*/
+
+CREATE TABLE procedures (
+    procedure_id INT PRIMARY KEY,
+    encounter_id INT NOT NULL
+        REFERENCES encounters(encounter_id),
+    cpt_code VARCHAR(10) NOT NULL,
+    procedure_description VARCHAR(100) NOT NULL,
+    procedure_category VARCHAR(50) NOT NULL,
+    procedure_charge NUMERIC(12,2) NOT NULL
+);
+
+
+/*
+========================================================
+9. MEDICATIONS
+========================================================
+Stores medication orders associated with
+patient encounters, including medication names,
+dosages, routes, and treatment dates.
+*/
+
+CREATE TABLE medications (
+    medorder_id INT PRIMARY KEY,
+    encounter_id INT NOT NULL
+        REFERENCES encounters(encounter_id),
+    med_name VARCHAR(50) NOT NULL,
+    med_class VARCHAR(50) NOT NULL,
+    dose VARCHAR(20) NOT NULL,
+    route VARCHAR(20) NOT NULL,
+    start_date DATE NOT NULL,
+    end_date DATE
+);
+
+
+/*
+========================================================
+10. CLAIMS
+========================================================
+Stores insurance claims, billed amounts,
+allowed amounts, payments, patient responsibility,
+claim status, and processing time.
+
+Encounter, patient, and insurance relationships
+are added in Section 2 using ALTER TABLE.
+*/
+
+CREATE TABLE claims (
+    claim_id INT PRIMARY KEY,
+    claim_date DATE NOT NULL,
+    billed_amount NUMERIC(12,2) NOT NULL,
+    allowed_amount NUMERIC(12,2) NOT NULL,
+    paid_amount NUMERIC(12,2) NOT NULL,
+    pat_responsibility NUMERIC(12,2) NOT NULL,
+    claim_status VARCHAR(10) NOT NULL,
+    processing_days INT NOT NULL
+);
+
+
+/*
+========================================================
+11. PAYMENTS
+========================================================
+Stores individual payment transactions associated
+with insurance claims and patients.
+
+Multiple payment transactions may be associated
+with a single claim.
+*/
+
+CREATE TABLE payments (
+    payment_id INT PRIMARY KEY,
+    claim_id INT NOT NULL
+        REFERENCES claims(claim_id),
+    patid INT NOT NULL
+        REFERENCES pat(patid),
+    payment_date DATE NOT NULL,
+    payment_source VARCHAR(20) NOT NULL,
+    amount NUMERIC(12,2) NOT NULL,
+    payment_method VARCHAR(20) NOT NULL
+);
+
+
+/*
+========================================================
+SECTION 2: ADD FOREIGN KEY RELATIONSHIPS
+========================================================
+
+OBJECTIVE:
+Establish relationships between tables that were
+initially created without all foreign key columns.
+
+APPROACH:
+Use ALTER TABLE to add the missing columns and
+foreign key constraints.
+
+These constraints enforce referential integrity
+by requiring referenced records to exist.
+*/
+
+
+-- Appointments: Connect patients and providers.
 
 ALTER TABLE appointments
 ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
-ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id)
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id);
 
---CLAIMS TABLE
+
+-- Claims: Connect encounters, patients, and insurance.
 
 ALTER TABLE claims
 ADD COLUMN encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
 ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
-ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id)
+ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id);
 
---ENCOUNTERS TABLE
+
+-- Encounters: Connect providers and patients.
 
 ALTER TABLE encounters
 ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id),
-ADD COLUMN patid INT NOT NULL REFERENCES pat(patid)
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid);
 
 
-/* Rescheduled is longer than VARCHAR(10) */
-ALTER TABLE appointments
-ALTER COLUMN status TYPE VARCHAR(15)
+-- Diagnoses: Connect diagnoses to patient encounters.
 
-
-/* Partially Paid is longer than VARCHAR(10) */
-ALTER TABLE claims
-ALTER COLUMN claim_status TYPE VARCHAR(20)
-
-
-/* Left Before Treatment is longer than VARCHAR(20) */
-ALTER TABLE encounters
-ALTER COLUMN discharge_status TYPE VARCHAR(25)
+ALTER TABLE diagnoses
+ADD COLUMN encounter_id INT REFERENCES encounters(encounter_id);
 
 
 /*
-Some emergency and inpatient encounters were not scheduled appointments,
-so appointment_id must allow NULL values.
+========================================================
+SECTION 3: MODIFY COLUMN DATA TYPES
+========================================================
+
+OBJECTIVE:
+Adjust column definitions to accommodate
+values identified in the healthcare dataset.
+
+APPROACH:
+Use ALTER TABLE to increase VARCHAR lengths
+where the original definitions were insufficient.
 */
+
+
+-- Appointments: "Rescheduled" exceeds VARCHAR(10).
+
+ALTER TABLE appointments
+ALTER COLUMN status TYPE VARCHAR(15);
+
+
+-- Claims: "Partially Paid" exceeds VARCHAR(10).
+
+ALTER TABLE claims
+ALTER COLUMN claim_status TYPE VARCHAR(20);
+
+
+-- Encounters: "Left Before Treatment" exceeds VARCHAR(20).
+
 ALTER TABLE encounters
-ALTER COLUMN appointment_id DROP NOT NULL
+ALTER COLUMN discharge_status TYPE VARCHAR(25);
+
+
+/*
+========================================================
+SECTION 4: MODIFY NULL CONSTRAINTS
+========================================================
+
+BUSINESS REQUIREMENT:
+Not every patient encounter originates from
+a scheduled appointment.
+
+Emergency and inpatient encounters may occur
+without a corresponding appointment record.
+
+SOLUTION:
+Allow appointment_id to contain NULL values
+while preserving its foreign key relationship.
+*/
+
+ALTER TABLE encounters
+ALTER COLUMN appointment_id DROP NOT NULL;
+
+
+/*
+========================================================
+DATABASE SCHEMA DEVELOPMENT COMPLETE
+========================================================
+
+RESULT:
+- Created 11 relational healthcare tables.
+- Defined primary keys and foreign key relationships.
+- Updated column sizes to support longer values.
+- Allowed encounters without scheduled appointments.
+- Linked diagnoses to encounters for clinical analysis.
+
+The database structure supports subsequent
+data import, validation, cleaning, and analysis.
+
+========================================================
+*/

@@ -1,99 +1,301 @@
-/*
-I initially created the tables in the "Create healthcare DB" file without all of their foreign keys
-because some of the referenced tables had not been created yet.
 
-After creating the remaining tables, I added the missing columns
-and relationships to complete the database structure.
+/*
+========================================================
+HEALTHCARE CAPSTONE PROJECT: SCHEMA MODIFICATIONS
+========================================================
+
+BUSINESS PURPOSE:
+Modify the original healthcare database structure
+to establish missing relationships, accommodate
+dataset values, and maintain consistent naming
+conventions across tables.
+
+OBJECTIVE:
+Demonstrate PostgreSQL database maintenance skills,
+including ALTER TABLE, foreign keys, data type
+modifications, column renaming, and NULL constraints.
+
+APPROACH:
+1. Add missing foreign key relationships.
+2. Modify column data types to support dataset values.
+3. Update NULL constraints for unscheduled encounters.
+4. Rename tables and columns for consistency.
+5. Add missing patient relationships to medications.
+
+NOTE:
+These changes were made after the initial tables
+were created in the healthcare database.
+
+========================================================
+SECTION 1: ADD FOREIGN KEY RELATIONSHIPS
+========================================================
+
+OBJECTIVE:
+Complete relationships between tables that were
+initially created without all foreign key columns.
+
+APPROACH:
+Use ALTER TABLE to add missing columns and establish
+relationships with existing primary keys.
+
+Foreign keys enforce referential integrity by
+preventing references to nonexistent records.
 */
 
 
--- APPOINTMENTS TABLE
+/*
+========================================================
+1. APPOINTMENTS
+========================================================
+Connect appointments to patients and providers.
+
+Each appointment is associated with a patient
+and a healthcare provider.
+*/
 
 ALTER TABLE appointments
 ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
-ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id)
+ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id);
 
 
--- CLAIMS TABLE
+/*
+========================================================
+2. CLAIMS
+========================================================
+Connect insurance claims to encounters,
+patients, and insurance plans.
+
+These relationships support financial analysis
+by patient, encounter, department, and payer.
+*/
 
 ALTER TABLE claims
 ADD COLUMN encounter_id INT NOT NULL REFERENCES encounters(encounter_id),
 ADD COLUMN patid INT NOT NULL REFERENCES pat(patid),
-ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id)
+ADD COLUMN plan_id INT NOT NULL REFERENCES insurance_plans(plan_id);
 
 
--- ENCOUNTERS TABLE
+/*
+========================================================
+3. ENCOUNTERS
+========================================================
+Connect patient encounters to providers
+and patients.
+
+These relationships support patient utilization
+and provider performance analysis.
+*/
 
 ALTER TABLE encounters
 ADD COLUMN provider_id INT NOT NULL REFERENCES providers(provider_id),
-ADD COLUMN patid INT NOT NULL REFERENCES pat(patid)
+ADD COLUMN patid INT NOT NULL REFERENCES pat(patid);
 
 
 /*
-The value "Rescheduled" is longer than the original VARCHAR(10),
-so I increased the column length to allow the full status value.
+========================================================
+SECTION 2: MODIFY COLUMN DATA TYPES
+========================================================
+
+OBJECTIVE:
+Increase column capacity where the original
+data types could not accommodate dataset values.
+
+APPROACH:
+Use ALTER COLUMN with TYPE to modify existing
+column definitions without recreating tables.
+*/
+
+
+/*
+========================================================
+4. APPOINTMENT STATUS
+========================================================
+The value "Rescheduled" exceeds VARCHAR(10).
+
+Increase the column length to VARCHAR(15)
+to accommodate the full appointment status.
 */
 
 ALTER TABLE appointments
-ALTER COLUMN status TYPE VARCHAR(15)
+ALTER COLUMN status TYPE VARCHAR(15);
 
 
 /*
-The value "Partially Paid" is longer than the original VARCHAR(10),
-so I increased the claim_status column length.
+========================================================
+5. CLAIM STATUS
+========================================================
+The value "Partially Paid" exceeds VARCHAR(10).
+
+Increase the column length to VARCHAR(20)
+to accommodate the full claim status.
 */
 
 ALTER TABLE claims
-ALTER COLUMN claim_status TYPE VARCHAR(20)
+ALTER COLUMN claim_status TYPE VARCHAR(20);
 
 
 /*
-The value "Left Before Treatment" is longer than the original VARCHAR(20),
-so I increased the discharge_status column length.
+========================================================
+6. DISCHARGE STATUS
+========================================================
+The value "Left Before Treatment" exceeds
+the original VARCHAR(20) limit.
+
+Increase the column length to VARCHAR(25).
 */
 
 ALTER TABLE encounters
-ALTER COLUMN discharge_status TYPE VARCHAR(25)
+ALTER COLUMN discharge_status TYPE VARCHAR(25);
 
 
 /*
-Some emergency and inpatient encounters were not tied to a scheduled appointment,
-so appointment_id needed to allow NULL values.
+========================================================
+7. DIAGNOSIS DESCRIPTION
+========================================================
+Some diagnosis descriptions exceed VARCHAR(20).
+
+Change the column type to TEXT to support
+variable-length clinical descriptions.
+
+The table is renamed in Section 4 before
+this modification is applied.
+*/
+
+
+/*
+========================================================
+SECTION 3: MODIFY NULL CONSTRAINTS
+========================================================
+
+BUSINESS REQUIREMENT:
+Not every healthcare encounter originates from
+a scheduled appointment.
+
+Emergency and inpatient encounters may occur
+without an associated appointment record.
+
+SOLUTION:
+Remove the NOT NULL constraint from appointment_id
+while preserving its foreign key relationship.
 */
 
 ALTER TABLE encounters
-ALTER COLUMN appointment_id DROP NOT NULL
+ALTER COLUMN appointment_id DROP NOT NULL;
 
 
--- Renamed the table to match the dataset naming convention.
+/*
+========================================================
+SECTION 4: STANDARDIZE DATABASE NAMING
+========================================================
+
+OBJECTIVE:
+Maintain consistent naming conventions across
+the healthcare database.
+
+APPROACH:
+Use ALTER TABLE to rename tables and columns
+without recreating the existing data.
+*/
+
+
+/*
+========================================================
+8. RENAME DIAGNOSIS TABLE
+========================================================
+Rename "diagnosis" to "diagnoses" to match
+the dataset and project naming convention.
+*/
 
 ALTER TABLE diagnosis
-RENAME TO diagnoses
+RENAME TO diagnoses;
 
 
-/*
-Some diagnosis descriptions were longer than VARCHAR(20),
-so I changed the column to TEXT to allow longer descriptions.
-*/
+-- Complete the diagnosis description modification.
 
 ALTER TABLE diagnoses
-ALTER COLUMN diagnosis_description TYPE TEXT
+ALTER COLUMN diagnosis_description TYPE TEXT;
 
 
 /*
-The medications dataset included patid, but the original table did not.
-I added the column and created a foreign key relationship to the patient table.
+========================================================
+9. RENAME PATIENT INSURANCE COLUMN
+========================================================
+Rename insurance_plan_id to plan_id for
+consistency with the insurance_plans and
+claims tables.
+
+The existing foreign key relationship
+is preserved.
+*/
+
+ALTER TABLE pat
+RENAME COLUMN insurance_plan_id TO plan_id;
+
+
+/*
+========================================================
+SECTION 5: ADD MEDICATION PATIENT RELATIONSHIP
+========================================================
+
+BUSINESS REQUIREMENT:
+The medications dataset contains a patient ID,
+but the original medications table did not.
+
+OBJECTIVE:
+Connect medication orders directly to patients
+to support medication and patient-level analysis.
+
+APPROACH:
+1. Add the patid column.
+2. Create a foreign key referencing pat(patid).
+3. Preserve existing medication records.
+
+NOTE:
+The new column allows NULL values because
+the original modification did not require
+a patient ID for every medication record.
+*/
+
+
+/*
+========================================================
+10. MEDICATIONS
+========================================================
+Add the patient identifier.
 */
 
 ALTER TABLE medications
-ADD COLUMN patid INT
+ADD COLUMN patid INT;
+
+
+-- Establish the patient foreign key relationship.
 
 ALTER TABLE medications
 ADD CONSTRAINT medications_patid_fkey
 FOREIGN KEY (patid)
-REFERENCES pat(patid)
+REFERENCES pat(patid);
 
--- Patient table
 
-ALTER TABLE pat
-RENAME COLUMN insurance_plan_id TO plan_id
+/*
+========================================================
+HEALTHCARE DATABASE SCHEMA MODIFICATIONS COMPLETE
+========================================================
+
+RESULT:
+- Added missing patient and provider relationships.
+- Connected insurance claims to healthcare encounters.
+- Expanded column sizes for longer dataset values.
+- Allowed encounters without scheduled appointments.
+- Standardized diagnosis table naming.
+- Updated diagnosis descriptions to TEXT.
+- Renamed the patient insurance column.
+- Added patient relationships to medication orders.
+
+BUSINESS IMPACT:
+These modifications improved the database structure
+to support relational joins, data integrity,
+clinical reporting, financial analysis, and
+the healthcare capstone business questions.
+
+========================================================
+*/

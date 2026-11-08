@@ -1,0 +1,285 @@
+
+/*
+========================================================
+QUESTION 4: CLAIMS DENIAL ANALYSIS
+========================================================
+
+BUSINESS QUESTION:
+Which insurance payers, departments, and diagnosis
+categories have the highest claim denial rates?
+
+OBJECTIVE:
+Analyze claim statuses, identify denial patterns,
+and compare denial rates across insurance payers,
+hospital departments, and diagnosis categories.
+
+APPROACH:
+1. Join claims with insurance, encounter, department,
+   and diagnosis information.
+2. Use GROUPING SETS to summarize all three dimensions.
+3. Calculate claim totals using conditional aggregation.
+4. Calculate denial percentages and rank the results.
+
+CTEs:
+1. denied_payer:
+   Prepare the claim-level dataset using INNER JOINs.
+
+2. denial_summary:
+   Use GROUPING SETS and conditional aggregation to
+   calculate claim totals across all three dimensions.
+
+FINAL ANALYSIS:
+Calculate denial percentages and organize results
+by analysis level and highest denial rate.
+
+========================================================
+*/
+
+/*
+========================================================
+CTE 1: BASE CLAIM DATA
+========================================================
+
+The first CTE joins five tables to collect claim
+information needed for the denial analysis.
+
+INNER JOIN connects claims to insurance plans,
+encounters, departments, and diagnoses.
+
+No aggregation is performed here because the second
+CTE will calculate the totals.
+
+A claim may appear multiple times when its encounter
+has multiple diagnosis records.
+
+========================================================
+*/
+
+WITH denied_payer AS (
+    SELECT
+        ip.payer_name,
+        dp.department_name,
+        d.diagnosis_category,
+        c.claim_id,
+        c.claim_status
+    FROM claims c
+    INNER JOIN insurance_plans ip
+        ON c.plan_id = ip.plan_id
+    INNER JOIN encounters e
+        ON c.encounter_id = e.encounter_id
+        AND c.patid = e.patid
+    INNER JOIN departments dp
+        ON dp.department_id = e.department_id
+    INNER JOIN diagnoses d
+        ON e.encounter_id = d.encounter_id
+),
+
+/*
+========================================================
+CTE 2: CLAIM DENIAL SUMMARY
+========================================================
+
+GROUPING SETS performs three independent analyses:
+- Insurance payer
+- Hospital department
+- Diagnosis category
+
+This replaces three separate aggregation CTEs.
+
+GROUPING() identifies which dimension is being
+analyzed and assigns its name to analysis_level.
+
+CASE combines the payer, department, and diagnosis
+names into one category column.
+
+COUNT(DISTINCT claim_id) counts each unique claim
+only once within each group.
+
+FILTER (WHERE ...) counts claims matching a specific
+status without needing separate CASE expressions.
+
+========================================================
+*/
+
+denial_summary AS (
+    SELECT
+        CASE
+            WHEN GROUPING(payer_name) = 0 THEN 'Payer'
+            WHEN GROUPING(department_name) = 0 THEN 'Department'
+            ELSE 'Diagnosis Category'
+        END AS analysis_level,
+
+        CASE
+            WHEN GROUPING(payer_name) = 0 THEN payer_name
+            WHEN GROUPING(department_name) = 0 THEN department_name
+            ELSE diagnosis_category
+        END AS category,
+
+        COUNT(DISTINCT claim_id) AS total_claims,
+
+        COUNT(DISTINCT claim_id)
+            FILTER (WHERE claim_status = 'Paid') AS paid_claims,
+
+        COUNT(DISTINCT claim_id)
+            FILTER (WHERE claim_status = 'Partially Paid') AS partial_pay,
+
+        COUNT(DISTINCT claim_id)
+            FILTER (WHERE claim_status = 'Denied') AS denied_claims,
+
+        COUNT(DISTINCT claim_id)
+            FILTER (WHERE claim_status = 'Pending') AS pending_claims
+
+    FROM denied_payer
+
+    GROUP BY GROUPING SETS (
+        (payer_name),
+        (department_name),
+        (diagnosis_category)
+    )
+)
+
+/*
+========================================================
+FINAL ANALYSIS: CLAIM DENIAL PERCENTAGES
+========================================================
+
+The final SELECT calculates the denial rate for
+each payer, department, and diagnosis category.
+
+FORMULA:
+Denial Rate = Denied Claims / Total Claims * 100
+
+100.0 ensures decimal division.
+
+NULLIF prevents division by zero.
+
+ROUND(..., 2) displays percentages to two decimals.
+
+ORDER BY groups the three analysis levels and ranks
+each category from highest to lowest denial rate.
+
+========================================================
+*/
+
+SELECT
+    analysis_level,
+    category,
+    total_claims,
+    paid_claims,
+    partial_pay,
+    denied_claims,
+    pending_claims,
+    ROUND(
+        denied_claims * 100.0 / NULLIF(total_claims, 0),
+        2
+    ) AS denial_rate
+FROM denial_summary
+ORDER BY analysis_level, denial_rate DESC;
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+OVERALL CLAIM STATUS:
+Total Claims:          8,477
+Paid Claims:           6,965
+Partially Paid Claims:   746
+Denied Claims:           477
+Pending Claims:          289
+
+Overall Denial Rate:   5.63%
+
+--------------------------------------------------------
+INSURANCE PAYER ANALYSIS
+--------------------------------------------------------
+
+Highest Denial Rate:
+Apex Health - 6.05% (162 denied / 2,678 claims)
+
+Lowest Denial Rate:
+CommonCare - 4.67% (39 denied / 836 claims)
+
+FINDINGS:
+Apex Health had both the highest denial rate and
+the highest number of denied claims among payers.
+
+This may warrant further investigation into payer-
+specific denial reasons and submission requirements.
+
+--------------------------------------------------------
+DEPARTMENT ANALYSIS
+--------------------------------------------------------
+
+Highest Denial Rate:
+Primary Care - 6.97% (14 denied / 201 claims)
+
+Highest Denial Volume:
+Emergency Medicine - 144 denied / 2,526 claims
+Denial Rate: 5.70%
+
+FINDINGS:
+Primary Care had the highest percentage of denied
+claims, while Emergency Medicine had the largest
+number of denials.
+
+Both denial rate and denial volume should be
+considered when prioritizing department reviews.
+
+--------------------------------------------------------
+DIAGNOSIS CATEGORY ANALYSIS
+--------------------------------------------------------
+
+Highest Denial Rate:
+Gastrointestinal - 6.50% (18 denied / 277 claims)
+
+Highest Denial Volume:
+Symptoms - 174 denied / 3,167 claims
+Denial Rate: 5.49%
+
+FINDINGS:
+Gastrointestinal had the highest denial percentage,
+while Symptoms had the greatest denial volume.
+
+These categories could be examined further to
+identify possible patterns in claim denials.
+
+--------------------------------------------------------
+BUSINESS TAKEAWAY
+--------------------------------------------------------
+
+The overall claim denial rate was 5.63%.
+
+The analysis identifies differences in denial rates
+and denial volumes across payers, departments,
+and diagnosis categories.
+
+High denial rates may indicate concentrated issues,
+while high denial volumes may create greater
+administrative workload.
+
+Further investigation into denial reasons is needed
+before determining root causes or corrective actions.
+
+--------------------------------------------------------
+DATA LIMITATIONS
+--------------------------------------------------------
+
+This capstone uses synthetic healthcare data.
+
+Diagnosis-to-encounter relationships were generated
+to support the analysis and do not represent verified
+clinical relationships.
+
+A claim can appear in multiple diagnosis categories,
+so diagnosis-category totals are not additive.
+
+COUNT(DISTINCT claim_id) prevents duplicate counting
+within each individual analysis group.
+
+The denial rate includes all claim statuses in the
+denominator, including Pending claims.
+
+========================================================
+*/
