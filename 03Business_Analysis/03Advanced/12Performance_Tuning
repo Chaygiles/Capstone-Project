@@ -1,0 +1,648 @@
+
+/*
+========================================================
+QUESTION 12: PERFORMANCE TUNING
+========================================================
+
+SOURCE QUERY:
+Question 6 - Provider Performance Scorecard
+
+BUSINESS QUESTION:
+How can we improve the performance of the Provider
+Performance Scorecard while maintaining accurate
+encounter, appointment, and financial metrics?
+
+OBJECTIVE:
+Evaluate how PostgreSQL executes an existing
+analytical query and determine whether indexing
+or restructuring the SQL improves performance.
+
+WHY I SELECTED QUESTION 6:
+The original Provider Performance Scorecard used
+seven CTEs, multiple joins, aggregations, and
+window functions.
+
+I selected this query to understand how PostgreSQL
+processes complex SQL and identify opportunities
+to simplify the code and improve performance.
+
+APPROACH:
+1. Analyze the original query using EXPLAIN ANALYZE.
+2. Record execution times and review operations.
+3. Refresh table statistics using ANALYZE.
+4. Evaluate the existing composite index.
+5. Restructure Question 6 using fewer CTEs.
+6. Compare execution plans and document findings.
+
+========================================================
+STEP 1: UNDERSTANDING EXPLAIN ANALYZE
+========================================================
+
+EXPLAIN:
+Displays PostgreSQL's execution plan, including
+how tables are scanned, joined, and aggregated.
+
+ANALYZE:
+Executes the query and measures its actual
+performance, including execution time.
+
+BUFFERS:
+Displays how PostgreSQL accesses database pages,
+including pages found in shared memory.
+
+HOW TO USE:
+Uncomment EXPLAIN below to display the execution
+plan instead of the normal scorecard results.
+
+========================================================
+STEP 2: ORIGINAL QUERY - BASELINE PERFORMANCE
+========================================================
+
+SOURCE:
+Original Question 6 - Provider Performance Scorecard
+
+The original query calculated provider volume,
+appointment attendance, and financial metrics
+using seven separate CTEs.
+
+BASELINE RESULTS:
+Planning Time: 15.758 ms
+Execution Time: 78.181 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+OBSERVATIONS:
+
+1. PostgreSQL used sequential scans to access
+   providers, encounters, appointments, claims,
+   and payments.
+
+2. Provider volume calculations processed
+   8,477 encounter records.
+
+3. Payment aggregation processed 12,386 payment
+   records into 7,835 claim/patient combinations.
+
+4. Sorting operations supported provider
+   aggregations and ranking calculations.
+
+5. Several estimated row counts differed
+   from the actual records processed.
+
+========================================================
+STEP 3: UPDATE DATABASE STATISTICS
+========================================================
+
+OBJECTIVE:
+Refresh PostgreSQL's table statistics to help
+the query planner make informed decisions.
+
+ANALYZE:
+Collects statistics used to estimate row counts
+and determine suitable execution plans.
+
+The five commands below were executed successfully.
+
+They are commented out because they have
+already been completed.
+*/
+
+/*
+ANALYZE providers;
+ANALYZE encounters;
+ANALYZE appointments;
+ANALYZE claims;
+ANALYZE payments;
+*/
+
+/*
+========================================================
+RESULTS AFTER UPDATING STATISTICS
+========================================================
+
+Planning Time: 6.712 ms
+Execution Time: 78.437 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+FINDINGS:
+
+1. Planning time was lower in the second run.
+
+2. Execution time remained nearly unchanged,
+   increasing from 78.181 ms to 78.437 ms.
+
+3. PostgreSQL continued using sequential scans
+   to process the major tables.
+
+4. Both executions returned 33 provider records.
+
+CONCLUSION:
+Refreshing statistics did not produce a meaningful
+execution-time improvement in this comparison.
+
+========================================================
+STEP 4: INDEX OPTIMIZATION
+========================================================
+
+OBJECTIVE:
+Investigate whether an index improves encounter
+joins using provider_id and department_id.
+
+COMPOSITE INDEX:
+An index containing multiple columns that
+PostgreSQL can use when locating records.
+
+CREATE INDEX:
+Creates an index that is stored in the database
+and remains available to future queries.
+
+IF NOT EXISTS:
+Prevents an error when an index with the specified
+name already exists.
+
+The index was created successfully and is available
+to both the original and updated scorecard queries.
+
+It does not need to be created every time
+the query is executed.
+
+The statement is commented out because
+the index already exists.
+*/
+
+/*
+CREATE INDEX IF NOT EXISTS idx_encounters_provider_department
+ON encounters(provider_id, department_id);
+*/
+
+/*
+========================================================
+INDEX EXECUTION RESULTS
+========================================================
+
+LATEST ORIGINAL QUERY:
+Planning Time: 10.686 ms
+Execution Time: 110.746 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+OBSERVATIONS:
+
+1. PostgreSQL continued using sequential scans
+   on the encounters table.
+
+2. The existing composite index was not selected
+   in the execution plan.
+
+3. The query processes a large portion of the
+   encounters table, making sequential scans
+   a reasonable execution strategy.
+
+4. Execution time varied compared with the
+   previous runs.
+
+IMPORTANT:
+Because the index was already present during
+the latest tests, these measurements do not
+establish a before-index versus after-index
+performance improvement.
+
+========================================================
+STEP 5: QUERY RESTRUCTURING
+========================================================
+
+OBJECTIVE:
+Simplify the original Provider Performance
+Scorecard while preserving its business purpose.
+
+ORIGINAL QUERY:
+Seven CTEs were used to calculate provider
+volume, appointment performance, and revenue.
+
+UPDATED QUERY:
+Two CTEs and one payment aggregation subquery
+are used to produce the provider scorecard.
+
+CHANGES MADE:
+
+1. Combined encounter volume and financial
+   calculations into Provider_Stats.
+
+2. Kept appointment attendance calculations
+   in Appointment_Summary.
+
+3. Moved the three RANK() window functions
+   into the final SELECT statement.
+
+4. Removed unnecessary intermediate CTEs.
+
+The updated query is easier to follow and
+requires fewer separate query sections.
+
+========================================================
+UPDATED QUERY: PROVIDER PERFORMANCE SCORECARD
+========================================================
+
+Uncomment EXPLAIN to view the execution plan.
+Leave it commented out to view the actual data.
+*/
+
+-- EXPLAIN (ANALYZE, BUFFERS)
+
+/*
+========================================================
+CTE 1: PROVIDER STATISTICS
+========================================================
+
+Combines encounter volume and financial performance
+for each provider within their department.
+
+METRICS:
+- Total_Encounters: Unique encounters handled.
+- Total_Claims: Unique insurance claims.
+- Total_Billed: Total amount billed.
+- Total_Allowed: Total amount allowed.
+- Total_Collected: Total payments received.
+
+INNER JOIN:
+Matches providers to their encounters using
+provider_id and department_id.
+
+LEFT JOIN:
+Retains encounters without matching claims.
+
+PAYMENT SUBQUERY:
+Aggregates multiple payment transactions into
+one total per claim and patient.
+
+This prevents multiple payment transactions
+from duplicating claim financial amounts.
+
+COALESCE:
+Converts missing payment totals to zero.
+
+GROUP BY:
+Produces one record per provider and department.
+*/
+
+WITH Provider_Stats AS (
+
+    SELECT
+        p.provider_id,
+        p.department_id,
+
+        /* Calculate encounter and claim volume */
+        COUNT(DISTINCT e.encounter_id) AS Total_Encounters,
+        COUNT(DISTINCT c.claim_id) AS Total_Claims,
+
+        /* Calculate provider financial totals */
+        SUM(c.billed_amount) AS Total_Billed,
+        SUM(c.allowed_amount) AS Total_Allowed,
+        COALESCE(SUM(pt.total_paid), 0) AS Total_Collected
+
+    FROM providers p
+
+    INNER JOIN encounters e
+        ON p.provider_id = e.provider_id
+        AND p.department_id = e.department_id
+
+    LEFT JOIN claims c
+        ON e.encounter_id = c.encounter_id
+        AND e.patid = c.patid
+
+    /*
+    Aggregate payments by claim and patient
+    before joining them to the claims table.
+    */
+
+    LEFT JOIN (
+        SELECT claim_id,
+            patid,
+            SUM(amount) AS total_paid
+        FROM payments
+        GROUP BY claim_id, patid
+    ) pt
+        ON c.claim_id = pt.claim_id
+        AND c.patid = pt.patid
+
+    GROUP BY p.provider_id, p.department_id
+),
+
+/*
+========================================================
+CTE 2: APPOINTMENT SUMMARY
+========================================================
+
+Calculates appointment attendance and no-show
+percentages for each provider.
+
+METRICS:
+- total_appointments: Scheduled appointments.
+- total_no_shows: Appointments marked No-Show.
+- no_show_rate: Percentage marked No-Show.
+
+CASE WHEN:
+Identifies appointments with a No-Show status.
+
+SUM():
+Counts the total number of no-shows.
+
+AVG():
+Calculates the no-show percentage by assigning
+100 to no-shows and zero to other statuses.
+
+ROUND():
+Displays percentages to two decimal places.
+
+NOTE:
+Cancelled appointments are included in the total
+appointment count and no-show rate denominator.
+*/
+
+Appointment_Summary AS (
+
+    SELECT
+        p.provider_id,
+        p.department_id,
+
+        /* Count all provider appointments */
+        COUNT(*) AS total_appointments,
+
+        /* Count missed appointments */
+        SUM(
+            CASE WHEN a.status = 'No-Show'
+                THEN 1 ELSE 0
+            END
+        ) AS total_no_shows,
+
+        /* Calculate the no-show percentage */
+        ROUND(
+            AVG(
+                CASE WHEN a.status = 'No-Show'
+                    THEN 100.0 ELSE 0
+                END
+            ),
+            2
+        ) AS no_show_rate
+
+    FROM providers p
+
+    INNER JOIN appointments a
+        ON p.provider_id = a.provider_id
+
+    GROUP BY p.provider_id, p.department_id
+)
+
+/*
+========================================================
+FINAL ANALYSIS: PROVIDER PERFORMANCE SCORECARD
+========================================================
+
+Combines provider statistics and appointment
+performance into one scorecard.
+
+LEFT JOIN:
+Retains providers with encounter records even
+when appointment information is unavailable.
+
+WINDOW FUNCTIONS:
+RANK() assigns rankings to providers within
+their respective departments.
+
+PARTITION BY department_id:
+Restarts rankings for each department.
+
+VOLUME RANK:
+Highest encounter total ranks first.
+
+NO-SHOW RANK:
+Lowest no-show percentage ranks first.
+
+REVENUE RANK:
+Highest collected revenue ranks first.
+*/
+
+SELECT
+    s.provider_id,
+    s.department_id,
+
+    /* Encounter volume and ranking */
+    s.Total_Encounters,
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Encounters DESC
+    ) AS Volume_Ranked,
+
+    /* Appointment performance */
+    a.total_appointments,
+    a.total_no_shows,
+    a.no_show_rate,
+
+    /* Rank lowest no-show percentages first */
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY a.no_show_rate ASC NULLS LAST
+    ) AS Show_performance,
+
+    /* Financial performance */
+    s.Total_Claims,
+    s.Total_Billed,
+    s.Total_Allowed,
+    s.Total_Collected,
+
+    /* Rank highest collected revenue first */
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Collected DESC
+    ) AS Revenue_Ranked
+
+FROM Provider_Stats s
+
+LEFT JOIN Appointment_Summary a
+    ON s.provider_id = a.provider_id
+    AND s.department_id = a.department_id
+
+ORDER BY s.department_id, Revenue_Ranked;
+
+
+/*
+========================================================
+STEP 6: UPDATED QUERY PERFORMANCE RESULTS
+========================================================
+
+The revised Question 6 query was evaluated using:
+
+EXPLAIN (ANALYZE, BUFFERS)
+
+UPDATED RESULTS:
+Planning Time: 19.944 ms
+Execution Time: 76.092 ms
+Returned Rows: 33
+Shared Buffer Hits: 401
+
+OBSERVATIONS:
+
+1. The query now uses two CTEs instead of seven.
+
+2. PostgreSQL continued using sequential scans
+   to process encounter and payment records.
+
+3. The existing composite index was not used.
+
+4. The query returned 33 provider records.
+
+5. Shared buffer hits decreased compared with
+   the original query's recorded execution plans.
+
+========================================================
+STEP 7: PERFORMANCE COMPARISON
+========================================================
+
+ORIGINAL QUERY - FIRST BASELINE:
+Planning Time: 15.758 ms
+Execution Time: 78.181 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+ORIGINAL QUERY - AFTER ANALYZE:
+Planning Time: 6.712 ms
+Execution Time: 78.437 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+ORIGINAL QUERY - LATEST EXECUTION:
+Planning Time: 10.686 ms
+Execution Time: 110.746 ms
+Returned Rows: 33
+Shared Buffer Hits: 490
+
+UPDATED QUERY:
+Planning Time: 19.944 ms
+Execution Time: 76.092 ms
+Returned Rows: 33
+Shared Buffer Hits: 401
+
+COMPARISON:
+
+1. The updated query reduced the number of
+   CTEs from seven to two.
+
+2. Execution time decreased from 110.746 ms
+   to 76.092 ms in the latest comparison.
+
+3. This represents approximately 31.3% lower
+   execution time for those two recorded runs.
+
+4. Shared buffer hits decreased from 490 to 401,
+   a reduction of approximately 18.2%.
+
+5. Planning time increased in the updated run.
+
+6. All executions returned 33 records.
+
+IMPORTANT:
+The original query also completed in approximately
+78 ms during earlier executions.
+
+Therefore, the 31.3% difference does not establish
+a consistent performance improvement.
+
+Repeated measurements under similar conditions
+would provide a more reliable comparison.
+
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+1. The original Provider Performance Scorecard
+   used seven CTEs to calculate provider
+   volume, appointment performance, and revenue.
+
+2. EXPLAIN ANALYZE identified sequential scans,
+   joins, aggregations, and sorting operations.
+
+3. Refreshing database statistics did not produce
+   a meaningful execution-time improvement.
+
+4. A composite index was created on the encounters
+   table using provider_id and department_id.
+
+5. PostgreSQL did not use the index in the recorded
+   execution plans.
+
+6. The updated query combined the original
+   calculations into two CTEs and one payment
+   aggregation subquery.
+
+7. The updated query executed in 76.092 ms,
+   compared with 110.746 ms for the latest
+   original query execution.
+
+8. The updated query recorded 89 fewer shared
+   buffer hits than the original query.
+
+9. All executions returned 33 provider records.
+   However, the financial and appointment values
+   must also be compared to verify identical results.
+
+10. Simplifying the SQL improved readability
+    and reduced the number of intermediate
+    query sections.
+
+========================================================
+FINAL CONCLUSION
+========================================================
+
+Performance tuning helped me understand how
+PostgreSQL executes complex analytical queries.
+
+I used EXPLAIN ANALYZE to examine the original
+Provider Performance Scorecard, measure query
+performance, and identify opportunities for
+optimization.
+
+After updating database statistics and testing
+an existing composite index, PostgreSQL continued
+using sequential scans.
+
+I then restructured Question 6 from seven CTEs
+into two CTEs with one payment subquery.
+
+The updated query was easier to understand
+and recorded fewer shared buffer hits.
+
+Although the updated query executed faster in
+the latest comparison, additional testing would
+be needed to establish a consistent improvement.
+
+This analysis demonstrated that performance
+optimization involves more than creating indexes.
+
+Reviewing execution plans, simplifying SQL,
+and validating the results are also important
+parts of database performance tuning.
+
+========================================================
+VALIDATION NOTE
+========================================================
+
+The original and updated queries returned
+the same number of provider records.
+
+However, matching row counts alone does not
+prove that all results are identical.
+
+The revised query changed the claim join from
+an INNER JOIN in the original revenue calculation
+to a LEFT JOIN in Provider_Stats.
+
+Appointment calculations should also be checked
+to confirm that their provider and department
+relationships are accurate.
+
+A full comparison of provider-level metrics
+would be required before claiming that both
+queries produce identical business results.
+*/

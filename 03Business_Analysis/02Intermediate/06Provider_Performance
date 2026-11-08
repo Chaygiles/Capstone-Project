@@ -1,0 +1,338 @@
+
+/*
+========================================================
+QUESTION 6: PROVIDER PERFORMANCE SCORECARD
+========================================================
+
+BUSINESS QUESTION:
+Rank healthcare providers within their departments
+based on encounter volume, collected revenue,
+and appointment no-show rates.
+
+OBJECTIVE:
+Evaluate provider performance by comparing patient
+encounter volume, financial contributions, and
+appointment attendance within each department.
+
+APPROACH:
+1. Calculate encounter volume and financial metrics
+   for each provider.
+2. Aggregate payments by claim to avoid duplication.
+3. Calculate appointment totals and no-show rates.
+4. Combine provider statistics and appointment data.
+5. Use window functions to rank providers within
+   their respective departments.
+
+RANKING CRITERIA:
+- Volume: Highest encounter count ranks #1.
+- Revenue: Highest collected revenue ranks #1.
+- No-Show: Lowest no-show percentage ranks #1.
+
+========================================================
+*/
+
+
+/*
+========================================================
+PART 1: PROVIDER STATISTICS
+========================================================
+
+This CTE combines encounter volume and financial
+performance for each provider within their department.
+
+METRICS:
+- Total_Encounters: Number of unique patient encounters.
+- Total_Claims: Number of unique insurance claims.
+- Total_Billed: Total amount billed for services.
+- Total_Allowed: Total amount approved or allowed.
+- Total_Collected: Total payments received.
+
+INNER JOIN connects providers to their encounters,
+ensuring the encounter belongs to the correct
+provider and department.
+
+LEFT JOIN connects encounters to claims while
+preserving encounters that have no matching claims.
+
+The payment subquery combines multiple payment
+transactions into one total per claim and patient.
+
+This prevents multiple payments from duplicating
+claim amounts when calculating provider revenue.
+
+COALESCE replaces missing payment totals with zero.
+
+GROUP BY produces one record per provider
+and department.
+
+========================================================
+*/
+
+WITH Provider_Stats AS (
+
+    SELECT
+        p.provider_id,
+        p.department_id,
+
+        /* Count each patient encounter only once */
+        COUNT(DISTINCT e.encounter_id) AS Total_Encounters,
+
+        /* Count unique claims associated with encounters */
+        COUNT(DISTINCT c.claim_id) AS Total_Claims,
+
+        /* Calculate financial totals */
+        SUM(c.billed_amount) AS Total_Billed,
+        SUM(c.allowed_amount) AS Total_Allowed,
+
+        /* Include zero when no payments were received */
+        COALESCE(SUM(pt.total_paid), 0) AS Total_Collected
+
+    FROM providers p
+
+    INNER JOIN encounters e
+        ON p.provider_id = e.provider_id
+        AND p.department_id = e.department_id
+
+    LEFT JOIN claims c
+        ON e.encounter_id = c.encounter_id
+        AND e.patid = c.patid
+
+    /*
+    Aggregate payments before joining to claims.
+
+    A claim may contain multiple payment records.
+    Grouping by claim_id and patid ensures that
+    payments are combined before calculating
+    total revenue for each provider.
+    */
+
+    LEFT JOIN (
+
+        SELECT
+            claim_id,
+            patid,
+            SUM(amount) AS total_paid
+
+        FROM payments
+
+        GROUP BY
+            claim_id,
+            patid
+
+    ) pt
+        ON c.claim_id = pt.claim_id
+        AND c.patid = pt.patid
+
+    GROUP BY
+        p.provider_id,
+        p.department_id
+),
+
+
+/*
+========================================================
+PART 2: APPOINTMENT AND NO-SHOW SUMMARY
+========================================================
+
+This CTE evaluates appointment attendance for
+each provider within their department.
+
+METRICS:
+- total_appointments: Total scheduled appointments.
+- total_no_shows: Appointments marked 'No-Show'.
+- no_show_rate: Percentage of appointments missed.
+
+CASE WHEN identifies appointments marked 'No-Show'.
+
+SUM() adds the number of missed appointments.
+
+AVG() calculates the no-show percentage by
+assigning 100.0 to missed appointments and
+zero to all other appointment statuses.
+
+ROUND() displays the percentage to two decimals.
+
+Grouping by provider_id and department_id
+produces one appointment summary per provider.
+
+NOTE:
+The calculation includes cancelled appointments
+in the total appointment count.
+
+========================================================
+*/
+
+Appointment_Summary AS (
+
+    SELECT
+        p.provider_id,
+        p.department_id,
+
+        /* Count all appointments for each provider */
+        COUNT(*) AS total_appointments,
+
+        /* Count appointments where patients did not show */
+        SUM(
+            CASE
+                WHEN a.status = 'No-Show' THEN 1
+                ELSE 0
+            END
+        ) AS total_no_shows,
+
+        /*
+        Calculate the percentage of appointments
+        marked as no-shows.
+        */
+
+        ROUND(
+            AVG(
+                CASE
+                    WHEN a.status = 'No-Show' THEN 100.0
+                    ELSE 0
+                END
+            ),
+            2
+        ) AS no_show_rate
+
+    FROM providers p
+
+    INNER JOIN appointments a
+        ON p.provider_id = a.provider_id
+
+    GROUP BY
+        p.provider_id,
+        p.department_id
+)
+
+
+/*
+========================================================
+PART 3: FINAL PROVIDER PERFORMANCE SCORECARD
+========================================================
+
+Combine provider statistics and appointment
+performance into one result.
+
+LEFT JOIN retains providers with encounter records,
+even when appointment data is unavailable.
+
+The JOIN uses provider_id and department_id
+to match the correct provider and department.
+
+WINDOW FUNCTIONS:
+
+RANK() assigns a numerical ranking to providers.
+
+PARTITION BY department_id separates providers
+into their departments, restarting rankings at
+1 for each department.
+
+ORDER BY DESC:
+Ranks providers with the highest values first.
+
+ORDER BY ASC:
+Ranks providers with the lowest values first.
+
+NULLS LAST:
+Places providers with missing no-show rates after
+providers with available appointment information.
+
+Each provider receives three separate rankings:
+1. Encounter volume
+2. No-show performance
+3. Collected revenue
+
+========================================================
+*/
+
+SELECT
+    s.provider_id,
+    s.department_id,
+
+    /*
+    VOLUME RANKING
+
+    Calculate encounter volume rankings within
+    each department.
+
+    Providers with the most encounters rank #1.
+    */
+
+    s.Total_Encounters,
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Encounters DESC
+    ) AS Volume_Ranked,
+
+    /*
+    APPOINTMENT PERFORMANCE
+
+    Display appointment totals and no-show rates.
+    */
+
+    a.total_appointments,
+    a.total_no_shows,
+    a.no_show_rate,
+
+    /*
+    NO-SHOW RANKING
+
+    Providers with the lowest no-show rates
+    receive the highest performance rankings.
+
+    NULLS LAST prevents missing percentages
+    from ranking ahead of valid percentages.
+    */
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY a.no_show_rate ASC NULLS LAST
+    ) AS Show_performance,
+
+    /*
+    REVENUE PERFORMANCE
+
+    Display total claims, billed amounts,
+    allowed amounts, and collected payments.
+    */
+
+    s.Total_Claims,
+    s.Total_Billed,
+    s.Total_Allowed,
+    s.Total_Collected,
+
+    /*
+    REVENUE RANKING
+
+    Rank providers by total collected revenue.
+
+    The provider generating the highest collected
+    revenue within each department ranks #1.
+    */
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Collected DESC
+    ) AS Revenue_Ranked
+
+FROM Provider_Stats s
+
+/*
+Combine provider financial statistics with
+appointment performance using provider
+and department identifiers.
+*/
+
+LEFT JOIN Appointment_Summary a
+    ON s.provider_id = a.provider_id
+    AND s.department_id = a.department_id
+
+/*
+Display results by department, with the highest
+collected revenue rankings appearing first.
+*/
+
+ORDER BY
+    s.department_id,
+    Revenue_Ranked;

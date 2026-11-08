@@ -1,0 +1,526 @@
+
+/*
+========================================================
+QUESTION 13: REUSABLE REPORTING LAYER
+========================================================
+
+BUSINESS QUESTION:
+How can existing healthcare analyses be converted
+into reusable reporting Views?
+
+OBJECTIVE:
+Create a PostgreSQL reporting layer that provides
+consistent patient utilization, encounter financial,
+and provider performance metrics.
+
+APPROACH:
+1. Reuse the Patient Utilization analysis from Q7.
+2. Adapt the financial analysis from Q2 to report
+   revenue at the encounter level.
+3. Reuse the Provider Performance Scorecard from Q6.
+4. Create three Views for future reporting.
+5. Validate the results and document business findings.
+
+REPORTING VIEWS:
+1. vw_patient_utilization
+2. vw_encounter_financials
+3. vw_provider_kpis
+
+========================================================
+*/
+
+
+/*
+========================================================
+VIEW 1: PATIENT UTILIZATION
+========================================================
+
+BUSINESS QUESTION:
+Which patients use healthcare services most frequently,
+and what diagnosis categories are most common?
+
+OBJECTIVE:
+Create a reusable View to analyze encounter frequency,
+patient utilization rankings, and diagnosis patterns.
+
+APPROACH:
+1. Count distinct encounters for each patient.
+2. Rank patients by total encounters.
+3. Join patients' encounters to their diagnoses.
+4. Calculate encounters associated with each category.
+5. Identify patients sharing diagnosis categories.
+
+CTEs:
+- Patient_Visits: Counts encounters for each patient.
+- High_Utilization: Ranks patients by visit frequency.
+
+FINAL ANALYSIS:
+Returns patient-level utilization metrics and
+diagnosis categories for reporting.
+
+========================================================
+*/
+
+CREATE OR REPLACE VIEW vw_patient_utilization AS
+
+/*
+========================================================
+CTE 1: PATIENT VISITS
+========================================================
+
+Calculate unique encounters for each patient.
+*/
+
+WITH Patient_Visits AS (
+    SELECT patid,
+        COUNT(DISTINCT encounter_id) AS total_visits
+    FROM encounters
+    GROUP BY patid
+),
+
+/*
+========================================================
+CTE 2: HIGH UTILIZATION
+========================================================
+
+DENSE_RANK:
+Ranks patients by encounter frequency.
+Patients with equal totals receive the same rank.
+*/
+
+High_Utilization AS (
+    SELECT patid, total_visits,
+        DENSE_RANK() OVER (
+            ORDER BY total_visits DESC
+        ) AS visit_rank
+    FROM Patient_Visits
+)
+
+/*
+========================================================
+FINAL ANALYSIS: PATIENT UTILIZATION
+========================================================
+
+INNER JOIN:
+Connect patients' encounters to diagnosis records.
+
+COUNT(DISTINCT):
+Counts encounters associated with each diagnosis
+category for an individual patient.
+
+COUNT(*) OVER:
+Counts patients sharing each diagnosis category.
+Each grouped row represents one patient/category.
+
+GROUP BY:
+Returns one row per patient and diagnosis category.
+
+The View includes all ranked patients rather than
+permanently restricting results to the top 10.
+*/
+
+SELECT h.patid, h.total_visits, h.visit_rank,
+    d.diagnosis_category,
+    COUNT(DISTINCT e.encounter_id) AS diagnosis_visits,
+    COUNT(*) OVER (
+        PARTITION BY d.diagnosis_category
+    ) AS patients_sharing_diagnosis
+FROM High_Utilization h
+INNER JOIN encounters e
+    ON h.patid = e.patid
+INNER JOIN diagnoses d
+    ON e.encounter_id = d.encounter_id
+GROUP BY h.patid, h.total_visits,
+    h.visit_rank, d.diagnosis_category;
+
+
+/*
+========================================================
+VIEW 2: ENCOUNTER FINANCIALS
+========================================================
+
+BUSINESS QUESTION:
+How much revenue is billed, allowed, and collected
+for each healthcare encounter?
+
+OBJECTIVE:
+Create a reusable View that summarizes financial
+activity by encounter rather than by department.
+
+APPROACH:
+1. Aggregate payments by claim and patient.
+2. Connect encounters to claims and payments.
+3. Calculate encounter-level financial totals.
+4. Preserve encounters without recorded claims.
+5. Make financial metrics available for reporting.
+
+CTEs:
+- Payment_Totals: Aggregates payments to prevent
+  multiple payment records from duplicating claim
+  financial amounts.
+
+FINAL ANALYSIS:
+Returns encounter-level claims, billed amounts,
+allowed amounts, total collections, and insurer-paid
+amounts recorded in the claims table.
+
+========================================================
+*/
+
+CREATE OR REPLACE VIEW vw_encounter_financials AS
+
+/*
+========================================================
+CTE 1: PAYMENT TOTALS
+========================================================
+
+A claim can have multiple payment records.
+
+SUM:
+Combines payments associated with each claim.
+
+GROUP BY:
+Produces one payment total per claim/patient pair,
+preventing payment-related duplication in the joins.
+*/
+
+WITH Payment_Totals AS (
+    SELECT claim_id, patid,
+        SUM(amount) AS total_payment
+    FROM payments
+    GROUP BY claim_id, patid
+)
+
+/*
+========================================================
+FINAL ANALYSIS: ENCOUNTER FINANCIALS
+========================================================
+
+LEFT JOIN:
+Preserves encounters without claims and claims
+without matching payment records.
+
+COUNT(DISTINCT):
+Counts unique claims associated with each encounter.
+
+SUM:
+Calculates billed, allowed, collected, and
+insurer-paid financial amounts.
+
+COALESCE:
+Returns zero when no collected payments are found.
+
+GROUP BY:
+Creates one financial summary per encounter.
+*/
+
+SELECT e.encounter_id, e.patid, e.department_id,
+    COUNT(DISTINCT c.claim_id) AS Total_Claims,
+    SUM(c.billed_amount) AS Total_Billed,
+    SUM(c.allowed_amount) AS Total_Allowed,
+    COALESCE(SUM(pt.total_payment), 0) AS Total_Collected,
+    SUM(c.paid_amount) AS Total_Insurer_Paid
+FROM encounters e
+LEFT JOIN claims c
+    ON e.encounter_id = c.encounter_id
+    AND e.patid = c.patid
+LEFT JOIN Payment_Totals pt
+    ON c.claim_id = pt.claim_id
+    AND c.patid = pt.patid
+GROUP BY e.encounter_id, e.patid, e.department_id;
+
+
+/*
+========================================================
+VIEW 3: PROVIDER PERFORMANCE KPIs
+========================================================
+
+BUSINESS QUESTION:
+How do healthcare providers compare in productivity,
+collected revenue, and patient appointment attendance?
+
+OBJECTIVE:
+Create a reusable provider scorecard using existing
+performance analysis from Question 6.
+
+APPROACH:
+1. Calculate provider encounter and claim totals.
+2. Calculate billed, allowed, and collected revenue.
+3. Summarize appointment totals and no-show rates.
+4. Combine provider financial and appointment metrics.
+5. Rank providers within their departments.
+
+CTEs:
+- Provider_Stats: Calculates productivity and revenue.
+- Appointment_Summary: Calculates appointment
+  attendance and no-show percentages.
+
+FINAL ANALYSIS:
+Returns provider KPIs and three department rankings:
+
+- Volume_Ranked: Highest encounters ranks first.
+- Show_Performance: Lowest no-show rate ranks first.
+- Revenue_Ranked: Highest collections ranks first.
+
+========================================================
+*/
+
+CREATE OR REPLACE VIEW vw_provider_kpis AS
+
+/*
+========================================================
+CTE 1: PROVIDER STATS
+========================================================
+
+INNER JOIN:
+Connect providers to their patient encounters.
+
+LEFT JOIN:
+Preserve encounters without claims and claims
+without matching payments.
+
+Payment Subquery:
+Combine payments by claim and patient before
+calculating provider financial totals.
+
+GROUP BY:
+Produces one summary per provider and department.
+*/
+
+WITH Provider_Stats AS (
+    SELECT p.provider_id, p.department_id,
+        COUNT(DISTINCT e.encounter_id) AS Total_Encounters,
+        COUNT(DISTINCT c.claim_id) AS Total_Claims,
+        SUM(c.billed_amount) AS Total_Billed,
+        SUM(c.allowed_amount) AS Total_Allowed,
+        COALESCE(SUM(pt.total_paid), 0) AS Total_Collected
+    FROM providers p
+    INNER JOIN encounters e
+        ON p.provider_id = e.provider_id
+        AND p.department_id = e.department_id
+    LEFT JOIN claims c
+        ON e.encounter_id = c.encounter_id
+        AND e.patid = c.patid
+    LEFT JOIN (
+        SELECT claim_id, patid,
+            SUM(amount) AS total_paid
+        FROM payments
+        GROUP BY claim_id, patid
+    ) pt
+        ON c.claim_id = pt.claim_id
+        AND c.patid = pt.patid
+    GROUP BY p.provider_id, p.department_id
+),
+
+/*
+========================================================
+CTE 2: APPOINTMENT SUMMARY
+========================================================
+
+COUNT(*):
+Counts appointments assigned to each provider.
+
+FILTER:
+Counts only appointments marked as No-Show.
+This simplifies the original CASE statements.
+
+No-Show Rate:
+No-show appointments / total appointments * 100.
+
+ROUND:
+Displays the percentage to two decimal places.
+*/
+
+Appointment_Summary AS (
+    SELECT p.provider_id, p.department_id,
+        COUNT(*) AS total_appointments,
+        COUNT(*) FILTER (
+            WHERE a.status = 'No-Show'
+        ) AS total_no_shows,
+        ROUND(
+            100.0 * COUNT(*) FILTER (
+                WHERE a.status = 'No-Show'
+            ) / COUNT(*), 2
+        ) AS no_show_rate
+    FROM providers p
+    INNER JOIN appointments a
+        ON p.provider_id = a.provider_id
+    GROUP BY p.provider_id, p.department_id
+)
+
+/*
+========================================================
+FINAL ANALYSIS: PROVIDER PERFORMANCE KPIs
+========================================================
+
+LEFT JOIN:
+Combines provider financial and appointment metrics,
+retaining providers with encounters even when
+appointment summaries are unavailable.
+
+RANK() OVER:
+Ranks providers within their own department.
+
+Volume_Ranked:
+Highest encounter volume receives rank 1.
+
+Show_Performance:
+Lowest no-show percentage receives rank 1.
+Missing rates are placed last.
+
+Revenue_Ranked:
+Highest collected revenue receives rank 1.
+
+Tied providers receive the same rank.
+*/
+
+SELECT s.provider_id, s.department_id,
+    s.Total_Encounters,
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Encounters DESC
+    ) AS Volume_Ranked,
+
+    a.total_appointments,
+    a.total_no_shows,
+    a.no_show_rate,
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY a.no_show_rate ASC NULLS LAST
+    ) AS Show_Performance,
+
+    s.Total_Claims,
+    s.Total_Billed,
+    s.Total_Allowed,
+    s.Total_Collected,
+
+    RANK() OVER (
+        PARTITION BY s.department_id
+        ORDER BY s.Total_Collected DESC
+    ) AS Revenue_Ranked
+
+FROM Provider_Stats s
+LEFT JOIN Appointment_Summary a
+    ON s.provider_id = a.provider_id
+    AND s.department_id = a.department_id;
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+STATUS:
+Results below were observed in the supplied
+pgAdmin screenshots.
+
+VIEW 1: PATIENT UTILIZATION
+
+1. Behavioral Health appears in the utilization
+   results for 993 distinct patients.
+
+2. Patient 985 recorded 8 total encounters,
+   receiving a utilization rank of 10.
+
+3. Patient 983 recorded 6 total encounters,
+   including 4 encounters associated with
+   the Behavioral Health diagnosis category.
+
+4. The View supports identifying high-utilization
+   patients and common diagnosis patterns.
+
+BUSINESS IMPACT:
+Enables healthcare analysts to investigate frequent
+service utilization and diagnosis trends. These
+metrics may support care management and resource
+planning, but do not independently establish why
+individual patients require frequent care.
+
+
+VIEW 2: ENCOUNTER FINANCIALS
+
+1. Encounter 1:
+   Total Claims:       1
+   Total Billed:       $488.36
+   Total Allowed:      $418.10
+   Total Collected:    $384.58
+   Total Insurer Paid: $326.10
+
+2. Encounter 4:
+   Total Claims:       1
+   Total Billed:       $513.54
+   Total Allowed:      $513.54
+   Total Collected:    $0.00
+   Total Insurer Paid: $0.00
+
+3. The View identifies differences between
+   amounts billed, allowed, and collected.
+
+BUSINESS IMPACT:
+Supports encounter-level revenue monitoring,
+payment reconciliation, and investigation of
+encounters showing no recorded collections.
+
+A zero collection amount does not automatically
+mean the claim has been denied or is overdue.
+
+
+VIEW 3: PROVIDER PERFORMANCE KPIs
+
+1. Provider 10 - Department 4:
+   Total Encounters:   371
+   Total Claims:       371
+   Total Collected:    $467,898.43
+   No-Show Rate:       10.95%
+   Volume Rank:        2
+
+2. Provider 38 - Department 2:
+   Total Encounters:   236
+   Total Appointments: 268
+   Total No-Shows:     19
+   No-Show Rate:       7.09%
+   Total Collected:    $213,131.32
+   No-Show Rank:       1
+
+3. Provider 33 - Department 1:
+   Total Encounters:   201
+   Total Appointments: 248
+   Total No-Shows:     19
+   No-Show Rate:       7.66%
+   Total Collected:    $45,309.25
+
+BUSINESS IMPACT:
+Allows department managers to compare productivity,
+financial contributions, and appointment attendance.
+
+Different KPIs measure different aspects of provider
+performance and should be interpreted together.
+
+========================================================
+OVERALL FINDINGS
+========================================================
+
+The three reporting Views provide reusable access
+to patient utilization, encounter financials,
+and provider performance metrics.
+
+BENEFITS:
+- Reduces repeated SQL query development.
+- Standardizes calculations across reports.
+- Supports consistent departmental analysis.
+- Provides reporting sources for Tableau or Power BI.
+- Simplifies future reporting and dashboard creation.
+
+VALIDATION:
+The screenshots confirm sample outputs from each
+analysis. Complete source-to-View reconciliation
+has not been independently verified.
+
+========================================================
+*/
+
+
+
+

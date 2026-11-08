@@ -1,0 +1,203 @@
+
+/*
+========================================================
+QUESTION 11: REVENUE LEAKAGE ANALYSIS
+========================================================
+
+BUSINESS QUESTION:
+Quantify billed-to-allowed and allowed-to-collected
+financial gaps by insurance payer.
+
+OBJECTIVE:
+Identify financial differences between billed charges,
+allowed amounts, and actual payments received.
+
+APPROACH:
+1. Summarize claims by insurance plan.
+2. Summarize payment transactions by insurance plan.
+3. Join both summaries using plan_id.
+4. Aggregate the results by payer_name to combine plans
+   belonging to the same insurance company.
+5. Calculate both financial gaps and rank the payers.
+
+========================================================
+CTE 1: CLAIM SUMMARY
+========================================================
+
+Calculate total claims, billed amounts, allowed amounts,
+and claim-recorded payments for each insurance plan.
+
+The LEFT JOIN preserves plans without claims.
+
+Grouping by plan_id and payer_name ensures each plan
+has one summarized record before the final analysis.
+
+========================================================
+*/
+
+WITH Claim_Summary AS (
+
+    SELECT i.plan_id, i.payer_name,
+        COUNT(DISTINCT c.claim_id) AS Total_Claims,
+        COALESCE(SUM(c.billed_amount), 0) AS Total_Billed,
+        COALESCE(SUM(c.allowed_amount), 0) AS Total_Allowed,
+        COALESCE(SUM(c.paid_amount), 0) AS Claim_Recorded_Paid
+    FROM insurance_plans i
+    LEFT JOIN claims c
+        ON i.plan_id = c.plan_id
+    GROUP BY i.plan_id, i.payer_name
+
+),
+
+/*
+========================================================
+CTE 2: PAYMENT SUMMARY
+========================================================
+
+Summarize all payment transactions for each plan.
+
+Join using claim_id and patid to associate payments
+with the correct claims.
+
+Separating payment aggregation from claim aggregation
+prevents multiple transactions from inflating billed
+and allowed amounts.
+
+========================================================
+*/
+
+Payment_Summary AS (
+
+    SELECT c.plan_id,
+        COUNT(DISTINCT p.payment_id) AS Total_Payments,
+        COALESCE(SUM(p.amount), 0) AS Total_Payments_Received
+    FROM claims c
+    LEFT JOIN payments p
+        ON c.claim_id = p.claim_id
+        AND c.patid = p.patid
+    GROUP BY c.plan_id
+
+)
+
+/*
+========================================================
+FINAL ANALYSIS: PAYER-LEVEL REVENUE LEAKAGE
+========================================================
+
+Join both CTEs by plan_id to preserve the correct
+relationship between claims and payments.
+
+GROUP BY payer_name combines different insurance
+plans belonging to the same payer.
+
+For example, Apex Health Plans 1 and 2 are combined
+into one payer-level financial summary.
+
+SUM() combines each plan's financial totals.
+
+COALESCE() treats missing payment summaries as zero.
+
+Billed-to-Allowed Gap:
+Total Billed - Total Allowed
+
+Allowed-to-Collected Gap:
+Total Allowed - Total Collected
+
+ORDER BY identifies the largest collection gaps first.
+
+========================================================
+*/
+
+SELECT s.payer_name,
+    SUM(s.Total_Claims) AS Total_Claims,
+    SUM(COALESCE(y.Total_Payments, 0)) AS Total_Payments,
+    SUM(s.Total_Billed) AS Total_Billed,
+    SUM(s.Total_Allowed) AS Total_Allowed,
+    SUM(s.Claim_Recorded_Paid) AS Claim_Recorded_Paid,
+    SUM(COALESCE(y.Total_Payments_Received, 0)) AS Total_Collected,
+    SUM(s.Total_Billed) - SUM(s.Total_Allowed)
+        AS Billed_to_Allowed_Gap,
+    SUM(s.Total_Allowed) -
+        SUM(COALESCE(y.Total_Payments_Received, 0))
+        AS Allowed_to_Collected_Gap
+FROM Claim_Summary s
+LEFT JOIN Payment_Summary y
+    ON s.plan_id = y.plan_id
+GROUP BY s.payer_name
+ORDER BY Allowed_to_Collected_Gap DESC;
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+PRELIMINARY PAYER-LEVEL RESULTS:
+Calculated from the confirmed plan-level results.
+Final payer-level query execution is pending.
+
+1. APEX HEALTH
+
+   Total Claims:                     2,678
+   Total Billed:             $3,429,852.83
+   Total Allowed:            $2,571,220.07
+   Total Collected:          $2,022,367.02
+
+   Billed-to-Allowed Gap:      $858,632.76
+   Allowed-to-Collected Gap:   $548,853.05
+
+   Apex Health has the largest collection gap across
+   all payers after combining Plans 1 and 2.
+
+2. NORTHSTAR MUTUAL
+
+   Total Claims:                     2,224
+   Total Billed:             $2,920,034.10
+   Total Allowed:            $2,172,880.48
+   Total Collected:          $1,727,134.17
+
+   Billed-to-Allowed Gap:      $747,153.62
+   Allowed-to-Collected Gap:   $445,746.31
+
+   Northstar Mutual has the second-largest collection
+   gap after combining Plans 3 and 4.
+
+3. SELF PAY
+
+   Total Claims:                       618
+   Billed-to-Allowed Gap:            $0.00
+   Allowed-to-Collected Gap:   $296,782.02
+
+   Self Pay has no billed-to-allowed difference but
+   has a substantial outstanding collection gap.
+
+4. COMMONCARE
+
+   Allowed-to-Collected Gap:    $52,639.12
+
+   CommonCare has the smallest absolute collection
+   gap among the six payers analyzed.
+
+========================================================
+BUSINESS IMPACT
+========================================================
+
+- Apex Health and Northstar Mutual represent the
+  largest absolute collection gaps and should be
+  prioritized for additional review.
+
+- Differences between billed and allowed charges
+  may reflect contractual adjustments rather than
+  revenue that can actually be recovered.
+
+- Allowed-to-collected differences may involve
+  outstanding balances, denials, or payment delays.
+
+- Collection percentages should also be reviewed
+  to account for differences in payer volume.
+
+- These results provide opportunities to investigate
+  potential revenue leakage and improve collections.
+
+========================================================
+*/

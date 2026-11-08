@@ -1,0 +1,170 @@
+
+/*
+========================================================
+QUESTION 8: REPEAT ACUTE-CARE UTILIZATION
+========================================================
+
+BUSINESS QUESTION:
+Identify patients who have repeat Emergency or Inpatient
+encounters within 30, 60, or 90 days.
+
+OBJECTIVE:
+Analyze repeat acute-care utilization by measuring the
+time between patient encounters and identifying how many
+patients return within each time period.
+
+APPROACH:
+1. Identify Emergency and Inpatient encounters in Acute Care.
+2. Use LAG() to retrieve each patient's previous encounter.
+3. Calculate the number of days between encounters.
+4. Classify returns into 0-30, 31-60, and 61-90 days.
+5. Count repeat encounters and unique patients by type
+   and return period.
+
+========================================================
+*/
+
+/*
+========================================================
+CTE 1: ACUTE-CARE ENCOUNTERS
+========================================================
+
+Join encounters to departments to identify Acute Care.
+
+Filter for Emergency and Inpatient encounters only.
+Retain individual encounters for the window analysis.
+*/
+
+WITH Acute_Care_Encounters AS (
+    SELECT e.patid, e.encounter_id,
+        e.encounter_date, e.encounter_type,
+        d.specialty_group
+    FROM encounters e
+    JOIN departments d
+        ON e.department_id = d.department_id
+    WHERE d.specialty_group = 'Acute Care'
+        AND e.encounter_type IN ('Emergency', 'Inpatient')
+),
+
+/*
+========================================================
+CTE 2: ENCOUNTER HISTORY
+========================================================
+
+LAG() retrieves the previous acute-care encounter date.
+
+PARTITION BY separates encounters by patient.
+ORDER BY arranges encounters chronologically.
+encounter_id breaks ties when dates are identical.
+
+The first qualifying encounter for each patient will
+have a NULL previous date.
+*/
+
+Encounter_History AS (
+    SELECT patid, encounter_id, encounter_type,
+        specialty_group, encounter_date,
+        LAG(encounter_date) OVER (
+            PARTITION BY patid
+            ORDER BY encounter_date ASC, encounter_id ASC
+        ) AS previous_dates
+    FROM Acute_Care_Encounters
+)
+
+/*
+========================================================
+FINAL ANALYSIS: REPEAT ACUTE-CARE UTILIZATION
+========================================================
+
+Calculate days between encounters and classify returns.
+
+COUNT(DISTINCT patid) counts unique patients.
+COUNT(encounter_id) counts repeat encounters.
+
+GROUP BY summarizes results by encounter type and
+return period rather than individual encounter dates.
+
+These periods are mutually exclusive, so each repeat
+encounter belongs to only one category.
+*/
+
+SELECT
+    encounter_type,
+
+    CASE
+        WHEN (encounter_date - previous_dates) <= 30
+            THEN '0-30 Days'
+        WHEN (encounter_date - previous_dates) <= 60
+            THEN '31-60 Days'
+        ELSE '61-90 Days'
+    END AS return_period,
+
+    COUNT(DISTINCT patid) AS total_patients,
+    COUNT(encounter_id) AS total_encounters
+
+FROM Encounter_History
+WHERE previous_dates IS NOT NULL
+    AND (encounter_date - previous_dates) BETWEEN 0 AND 90
+
+GROUP BY encounter_type, return_period
+ORDER BY encounter_type, return_period
+
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+ACUTE-CARE ENCOUNTER POPULATION:
+- Total Emergency/Inpatient encounters: 978
+- Repeat encounters within 90 days: 65
+
+EMERGENCY ENCOUNTERS:
+- 0-30 Days: 18 patients, 18 encounters
+- 31-60 Days: 17 patients, 17 encounters
+- 61-90 Days: 22 patients, 24 encounters
+- Total repeat encounters: 59 (90.8%)
+
+INPATIENT ENCOUNTERS:
+- 0-30 Days: 4 patients, 4 encounters
+- 31-60 Days: 1 patient, 1 encounter
+- 61-90 Days: 1 patient, 1 encounter
+- Total repeat encounters: 6 (9.2%)
+
+KEY FINDINGS:
+1. Emergency encounters represented the majority
+   of repeat acute-care utilization.
+
+2. The 61-90-day period had the highest number
+   of repeat encounters (25).
+
+3. Some patients experienced multiple repeat
+   encounters, indicating recurring utilization.
+
+4. Repeat encounters were identified using the
+   previous qualifying acute-care encounter date,
+   regardless of whether that encounter was
+   Emergency or Inpatient.
+
+BUSINESS IMPLICATIONS:
+Repeat acute-care utilization may indicate
+opportunities to improve discharge planning,
+care coordination, and follow-up services.
+
+Additional analysis of patient diagnoses and
+clinical circumstances would help identify
+potential drivers of repeat utilization.
+
+ANALYSIS LIMITATIONS:
+- Patient counts are distinct within each group,
+  not necessarily across the entire population.
+- Return periods are mutually exclusive.
+- Results measure encounters, not formal
+  hospital readmission rates.
+- Repeat utilization alone does not establish
+  avoidable care or poor clinical outcomes.
+
+========================================================
+*/
+

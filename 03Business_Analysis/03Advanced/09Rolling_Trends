@@ -1,0 +1,170 @@
+
+/*
+========================================================
+QUESTION 9: THREE-MONTH ROLLING TRENDS
+========================================================
+
+BUSINESS QUESTION:
+Calculate 3-month rolling encounter volume and
+collections by department.
+
+OBJECTIVE:
+Analyze encounter volume and collections over
+3-month periods to identify trends in department
+activity and financial performance.
+
+APPROACH:
+1. Group encounters by department and month.
+2. Join claims and payments to calculate collections.
+3. Count distinct encounters to prevent inflated volume.
+4. Calculate monthly encounter volume and collections.
+5. Use window functions to calculate rolling 3-month
+   totals for each department.
+
+CTE:
+Monthly_Metrics:
+Summarizes monthly encounter volume and collections
+for each department.
+
+FINAL ANALYSIS:
+Calculate rolling 3-month encounter volume and
+collections using SUM() OVER() with window frames.
+
+========================================================
+*/
+
+WITH Monthly_Metrics AS (
+
+    /*
+    Calculate monthly encounter volume and collections.
+
+    LEFT JOIN retains encounters without claims or
+    payments so they are still included in the volume.
+
+    COUNT(DISTINCT) prevents encounters from being
+    counted multiple times when multiple payments exist.
+
+    COALESCE returns 0 when no payments are recorded.
+    */
+
+    SELECT e.department_id,
+        COUNT(DISTINCT e.encounter_id) AS Monthly_Volume,
+        DATE_TRUNC('MONTH', e.encounter_date)::DATE AS Month_Encounters,
+        COALESCE(SUM(p.amount), 0) AS Monthly_Collections
+    FROM encounters e
+    LEFT JOIN claims c
+        ON e.encounter_id = c.encounter_id
+        AND e.patid = c.patid
+    LEFT JOIN payments p
+        ON c.claim_id = p.claim_id
+        AND c.patid = p.patid
+    GROUP BY e.department_id, Month_Encounters
+
+)
+
+/*
+========================================================
+FINAL ANALYSIS: ROLLING 3-MONTH TOTALS
+========================================================
+
+SUM() OVER() calculates rolling totals without
+combining or removing individual monthly records.
+
+PARTITION BY:
+Separates calculations by department so each
+department's totals are calculated independently.
+
+ORDER BY:
+Organizes months chronologically for the calculation.
+
+ROWS BETWEEN 2 PRECEDING AND CURRENT ROW:
+Includes the current month and two previous rows,
+creating a rolling 3-month window when months
+are consecutive.
+
+The final ORDER BY displays the newest months first.
+
+========================================================
+*/
+
+SELECT department_id, Monthly_Volume,
+    Month_Encounters, Monthly_Collections,
+
+    SUM(Monthly_Volume) OVER (
+        PARTITION BY department_id
+        ORDER BY Month_Encounters
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) AS Rolling_3_Month_Volume,
+
+    SUM(Monthly_Collections) OVER (
+        PARTITION BY department_id
+        ORDER BY Month_Encounters
+        ROWS BETWEEN 2 PRECEDING AND CURRENT ROW
+    ) AS Rolling_3_Month_Collections
+
+FROM Monthly_Metrics
+ORDER BY department_id, Month_Encounters DESC;
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+The initial analysis returned 224 department-month
+records. The following findings are based on
+Department 1 results visible in the query output.
+
+ENCOUNTER VOLUME:
+
+1. Department 1 recorded 8 encounters in July 2026
+   and 2 encounters in August 2026.
+
+2. The rolling 3-month encounter volume decreased
+   from 21 in July to 16 in August, a 23.8% decline.
+
+3. The July rolling total includes May, June,
+   and July with 7, 6, and 8 encounters.
+
+COLLECTIONS:
+
+1. Department 1 collected $1,658.49 for July 2026
+   encounters and $77.12 for August 2026 encounters.
+
+2. Rolling 3-month collections decreased from
+   $5,049.63 in July to $2,853.52 in August,
+   representing a 43.5% decline.
+
+3. The March-May 2026 period generated $5,500.17
+   in collections across 19 encounters.
+
+BUSINESS IMPLICATIONS:
+
+1. Declining rolling encounter volume may indicate
+   reduced patient activity within the department.
+
+2. Declining collections may indicate changes in
+   encounter volume, reimbursement, or payment activity.
+
+3. Comparing rolling trends can help identify
+   departments requiring further operational
+   or financial investigation.
+
+4. The August decline should be investigated before
+   concluding that department performance deteriorated.
+   Data completeness and payment timing may affect
+   the reported totals.
+
+LIMITATIONS:
+
+Collections are grouped by encounter date rather
+than the actual payment date.
+
+Rolling windows assume consecutive monthly records;
+missing months would require additional handling.
+
+These findings reflect the initial query output
+and should be reconfirmed after the JOIN adjustment.
+
+========================================================
+*/

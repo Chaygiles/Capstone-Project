@@ -1,0 +1,382 @@
+
+/*
+========================================================
+QUESTION 14: STORED BUSINESS LOGIC
+PATIENT REVENUE & UTILIZATION REPORT
+========================================================
+
+BUSINESS QUESTION:
+How much revenue was collected per patient during
+a selected reporting period, and how frequently
+did each patient receive care?
+
+OBJECTIVE:
+Create a reusable PostgreSQL function that returns
+patient utilization and financial KPIs for a
+specified date range.
+
+APPROACH:
+1. Accept a start date and end date as parameters.
+2. Filter patient encounters by the selected dates.
+3. Calculate patient visits and departments visited.
+4. Retrieve financial metrics from the existing view.
+5. Return patient-level KPIs ordered by collections.
+
+CTEs:
+- Period_Encounters: Identify encounters within
+  the selected reporting period.
+
+- Patient_Utilization: Calculate encounter totals
+  and departments visited per patient.
+
+- Financial_Summary: Calculate billed, allowed,
+  and collected amounts per patient.
+
+FINAL ANALYSIS:
+Combine patient utilization and financial metrics
+to evaluate patient-level revenue performance.
+
+========================================================
+*/
+
+/*
+========================================================
+FUNCTION CREATION
+========================================================
+
+CREATE OR REPLACE FUNCTION:
+Creates a stored function that can be reused.
+OR REPLACE allows the function body to be updated.
+
+PARAMETERS:
+p_start_date and p_end_date allow users to select
+a reporting period without rewriting the query.
+
+RETURNS TABLE:
+Defines the columns and data types returned.
+
+LANGUAGE plpgsql:
+Uses PostgreSQL's procedural SQL language.
+
+BEGIN / END:
+Defines the executable function body.
+
+RETURN QUERY:
+Executes the SELECT statement and returns its
+results to the user.
+
+========================================================
+*/
+
+CREATE OR REPLACE FUNCTION fn_patient_revenue(
+    p_start_date DATE,
+    p_end_date DATE
+)
+
+RETURNS TABLE (
+    patid INTEGER,
+    total_encounters BIGINT,
+    departments_visited TEXT,
+    total_billed NUMERIC,
+    total_allowed NUMERIC,
+    total_collected NUMERIC,
+    collection_pct_of_allowed NUMERIC
+)
+
+LANGUAGE plpgsql
+AS $$
+
+BEGIN
+
+    -- Prevent missing dates or reversed date ranges.
+    IF p_start_date IS NULL OR p_end_date IS NULL
+        OR p_start_date > p_end_date THEN
+        RAISE EXCEPTION 'Invalid reporting date range';
+    END IF;
+
+    RETURN QUERY
+
+    /*
+    ====================================================
+    CTE 1: PERIOD ENCOUNTERS
+    ====================================================
+
+    Identify patient encounters within the selected
+    reporting period.
+
+    The function parameters replace hardcoded dates.
+
+    Adding 1 to p_end_date includes the entire
+    final day, even when timestamps are present.
+    ====================================================
+    */
+
+    WITH Period_Encounters AS (
+        SELECT e.patid, e.encounter_id, e.department_id
+        FROM encounters e
+        WHERE e.encounter_date >= p_start_date
+            AND e.encounter_date < p_end_date + 1
+    ),
+
+    /*
+    ====================================================
+    CTE 2: PATIENT UTILIZATION
+    ====================================================
+
+    Calculate each patient's encounter count and
+    identify the departments where they received care.
+
+    COUNT DISTINCT:
+    Prevents duplicate encounters from being counted.
+
+    STRING_AGG:
+    Combines department names into one column.
+
+    GROUP BY:
+    Returns one summarized row per patient.
+    ====================================================
+    */
+
+    Patient_Utilization AS (
+        SELECT pe.patid,
+            COUNT(DISTINCT pe.encounter_id)
+                AS Total_Encounters,
+            STRING_AGG(DISTINCT d.department_name, ', ')
+                AS Departments_Visited
+        FROM Period_Encounters pe
+        LEFT JOIN departments d
+            ON pe.department_id = d.department_id
+        GROUP BY pe.patid
+    ),
+
+    /*
+    ====================================================
+    CTE 3: FINANCIAL SUMMARY
+    ====================================================
+
+    Reuse vw_encounter_financials from Question 13.
+
+    The view contains encounter-level billed,
+    allowed, and collected amounts.
+
+    JOIN:
+    Match the selected encounters to their financial
+    records using encounter_id and patid.
+
+    LEFT JOIN:
+    Preserves encounters without financial records.
+
+    SUM:
+    Calculates patient-level financial totals.
+
+    GROUP BY:
+    Returns one financial summary per patient.
+
+    NOTE:
+    The financial view is expected to contain
+    one row per encounter and patient.
+    ====================================================
+    */
+
+    Financial_Summary AS (
+        SELECT pe.patid,
+            SUM(f.total_billed) AS Total_Billed,
+            SUM(f.total_allowed) AS Total_Allowed,
+            SUM(f.total_collected) AS Total_Collected
+        FROM Period_Encounters pe
+        LEFT JOIN vw_encounter_financials f
+            ON pe.encounter_id = f.encounter_id
+            AND pe.patid = f.patid
+        GROUP BY pe.patid
+    )
+
+    /*
+    ====================================================
+    FINAL ANALYSIS: PATIENT REVENUE KPIs
+    ====================================================
+
+    Combine patient utilization and financial metrics.
+
+    COALESCE:
+    Replace missing financial totals with zero.
+
+    NULLIF:
+    Prevent division by zero when total allowed
+    revenue equals zero.
+
+    COLLECTION PERCENTAGE:
+    (Total Collected / Total Allowed) * 100
+
+    ORDER BY:
+    Rank patients from highest to lowest collected
+    revenue within the reporting period.
+    ====================================================
+    */
+
+    SELECT pu.patid,
+        pu.Total_Encounters,
+        pu.Departments_Visited,
+        COALESCE(fs.Total_Billed, 0),
+        COALESCE(fs.Total_Allowed, 0),
+        COALESCE(fs.Total_Collected, 0),
+        ROUND(
+            fs.Total_Collected * 100.0 /
+            NULLIF(fs.Total_Allowed, 0), 2
+        )
+    FROM Patient_Utilization pu
+    LEFT JOIN Financial_Summary fs
+        ON pu.patid = fs.patid
+    ORDER BY COALESCE(fs.Total_Collected, 0) DESC;
+
+END;
+$$;
+
+/*
+========================================================
+FUNCTION EXECUTION / TESTING
+========================================================
+
+Once the function has been created, it can be
+executed using SELECT.
+
+The date parameters determine which encounters
+are included in the analysis.
+
+Run each test query separately in pgAdmin.
+========================================================
+*/
+
+-- TEST 1: FIRST QUARTER (JANUARY - MARCH 2026)
+
+SELECT *
+FROM fn_patient_revenue('2026-01-01', '2026-03-31');
+
+
+-- TEST 2: SECOND QUARTER (APRIL - JUNE 2026)
+
+SELECT *
+FROM fn_patient_revenue('2026-04-01', '2026-06-30');
+
+
+-- TEST 3: FULL YEAR 2026
+
+SELECT *
+FROM fn_patient_revenue('2026-01-01', '2026-12-31');
+
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+Q1 2026: PATIENT REVENUE
+--------------------------------------------------------
+
+- The function returned 633 patient records.
+
+- Patient 117 generated the highest collected
+  revenue at $34,315.58.
+
+- Patient 117 had 1 encounter in General Surgery.
+
+- Total billed: $37,899.24.
+- Total allowed: $34,574.13.
+- Collection percentage: 99.25%.
+
+Q2 2026: PATIENT REVENUE
+--------------------------------------------------------
+
+- The function returned 659 patient records.
+
+- Patient 454 generated the highest collected
+  revenue at $25,755.46.
+
+- Patient 454 completed 3 encounters across
+  Emergency Medicine and Endocrinology.
+
+- Total billed: $34,382.39.
+- Total allowed: $27,151.08.
+- Collection percentage: 94.86%.
+
+FULL-YEAR 2026: PATIENT REVENUE
+--------------------------------------------------------
+
+- Patient 454 had the highest collected revenue
+  in the displayed annual results.
+
+- Patient 454 completed 4 encounters across
+  Emergency Medicine, Endocrinology,
+  and General Surgery.
+
+- Total billed: $60,651.57.
+- Total allowed: $47,102.70.
+- Total collected: $41,609.74.
+- Collection percentage: 88.34%.
+
+Note:
+The full-year screenshot displayed the first
+1,000 records; the total number of annual
+patient records was not confirmed.
+
+========================================================
+VALIDATION RESULTS
+========================================================
+
+Patient 454 was used to validate the function
+across Q1, Q2, and the full-year reporting period.
+
+ENCOUNTER COMPARISON:
+Q1 Encounters:          1
+Q2 Encounters:          3
+Full-Year Encounters:   4
+
+1 + 3 = 4 encounters.
+
+REVENUE COMPARISON:
+Q1 Collected:       $15,854.28
+Q2 Collected:       $25,755.46
+Full-Year Collected: $41,609.74
+
+$15,854.28 + $25,755.46 = $41,609.74
+
+The encounter counts and collected revenue
+reconcile across the three reporting periods
+for Patient 454.
+
+This validates the date filtering and financial
+aggregation for the patient tested.
+
+========================================================
+BUSINESS VALUE
+========================================================
+
+The function creates a reusable reporting process
+for healthcare revenue and utilization analysis.
+
+Healthcare Data Analysts can use this function to:
+
+- Evaluate patient utilization by reporting period.
+- Identify patients with high collected revenue.
+- Compare billed, allowed, and collected amounts.
+- Analyze collection percentages.
+- Identify departments associated with patient care.
+- Generate consistent quarterly and annual reports.
+
+The function eliminates the need to manually
+change date filters or rebuild the analysis
+for each reporting period.
+
+REPORTING LIMITATION:
+Collected revenue is attributed to encounters
+occurring during the selected period.
+
+Payments may have been received before or after
+that period. This is not a payment-date-based
+cash collections report.
+
+The collection percentage measures collections
+relative to allowed amounts, not a formally
+validated net collection rate.
+
+========================================================
+*/

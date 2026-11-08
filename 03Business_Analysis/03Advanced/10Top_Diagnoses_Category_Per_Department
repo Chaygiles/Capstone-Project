@@ -1,0 +1,211 @@
+
+/*
+========================================================
+QUESTION 10: TOP DIAGNOSIS CATEGORY PER DEPARTMENT
+========================================================
+
+BUSINESS QUESTION:
+Identify the leading diagnosis category for each
+department and year.
+
+OBJECTIVE:
+Determine which diagnosis categories occur most
+frequently within each department annually.
+
+APPROACH:
+1. Join departments, encounters, and diagnoses.
+2. Extract the encounter year.
+3. Count diagnoses by department, year, and category.
+4. Rank diagnosis categories based on frequency.
+5. Return the highest-ranked category for each
+   department and year.
+
+Two CTEs are used to organize the analysis.
+The first calculates diagnosis totals, while the
+second ranks those totals using DENSE_RANK().
+
+========================================================
+CTE 1: DIAGNOSES_COUNT
+========================================================
+
+Gather diagnosis records associated with each
+department through their encounters.
+
+EXTRACT(YEAR FROM encounter_date):
+Identifies the year in which the encounter occurred.
+
+COUNT(*):
+Counts the number of diagnosis records for each
+department, year, and diagnosis category.
+
+GROUP BY:
+Combines records with the same department, year,
+and diagnosis category to calculate their totals.
+
+========================================================
+*/
+
+WITH Diagnoses_Count AS (
+    SELECT d.department_id,
+        d.department_name,
+        EXTRACT(YEAR FROM e.encounter_date) AS encounter_year,
+        dg.diagnosis_category,
+        COUNT(*) AS total_diagnoses
+    FROM departments d
+    INNER JOIN encounters e
+        ON d.department_id = e.department_id
+    INNER JOIN diagnoses dg
+        ON e.encounter_id = dg.encounter_id
+    GROUP BY d.department_id, d.department_name,
+        EXTRACT(YEAR FROM e.encounter_date),
+        dg.diagnosis_category
+),
+
+/*
+========================================================
+CTE 2: DIAGNOSES_RANKED
+========================================================
+
+Rank diagnosis categories based on their frequency
+within each department and year.
+
+DENSE_RANK():
+Assigns a ranking based on total diagnoses.
+
+PARTITION BY department_id, encounter_year:
+Creates a separate ranking for each department
+and year. Rankings restart at 1 for each group.
+
+ORDER BY total_diagnoses DESC:
+Places the category with the highest diagnosis
+count in first place.
+
+Categories with equal totals receive the same
+rank without skipping subsequent ranking numbers.
+
+No additional GROUP BY is required because the
+first CTE has already calculated the totals.
+
+========================================================
+*/
+
+Diagnoses_Ranked AS (
+    SELECT department_id,
+        department_name,
+        encounter_year,
+        diagnosis_category,
+        total_diagnoses,
+        DENSE_RANK() OVER (
+            PARTITION BY department_id, encounter_year
+            ORDER BY total_diagnoses DESC
+        ) AS diagnosis_rank
+    FROM Diagnoses_Count
+)
+
+/*
+========================================================
+FINAL ANALYSIS
+========================================================
+
+Return the leading diagnosis category for each
+department and year.
+
+WHERE diagnosis_rank = 1:
+Filters the results to categories ranked first.
+
+If multiple categories share the highest count
+within a department and year, all tied categories
+are returned.
+
+Results are organized by department and year.
+
+========================================================
+*/
+
+SELECT department_name, encounter_year,
+    diagnosis_category, total_diagnoses,
+    diagnosis_rank
+FROM Diagnoses_Ranked
+WHERE diagnosis_rank = 1
+ORDER BY department_name, encounter_year;
+
+/*
+========================================================
+BUSINESS RESULTS / FINDINGS
+========================================================
+
+PRELIMINARY FINDINGS:
+Based on the initial Diagnosis_Counts results
+shown before the final ranking query was executed.
+
+1. BEHAVIORAL HEALTH
+
+Behavioral Health was the only diagnosis category
+shown for this department in the initial results.
+
+2024: 905 diagnoses
+2025: 894 diagnoses
+2026: 656 diagnoses
+
+Diagnosis counts declined across the three years.
+However, 2026 may represent an incomplete year,
+so annual comparisons should be made cautiously.
+
+2. CARDIOLOGY
+
+The Cardiovascular category had the highest
+observed diagnosis count in all three years.
+
+2024: 487 cardiovascular diagnoses
+2025: 497 cardiovascular diagnoses
+2026: 319 cardiovascular diagnoses
+
+The Symptoms category was second in each year:
+
+2024: 344 diagnoses
+2025: 304 diagnoses
+2026: 208 diagnoses
+
+These results suggest that cardiovascular
+conditions consistently account for the largest
+share of diagnoses in Cardiology.
+
+3. EMERGENCY MEDICINE
+
+In 2024, Symptoms was the leading observed
+diagnosis category with 746 diagnoses.
+
+Neurologic followed with 266 diagnoses.
+
+This suggests that symptom-related diagnoses
+represented a substantial portion of the
+department's recorded diagnoses that year.
+
+========================================================
+BUSINESS IMPACT
+========================================================
+
+This analysis helps healthcare management:
+
+1. Identify the most frequently recorded
+   diagnosis categories across departments.
+
+2. Monitor changes in diagnosis patterns
+   from year to year.
+
+3. Support staffing, clinical resource planning,
+   and department-level performance reviews.
+
+4. Identify categories that may require
+   additional clinical attention or analysis.
+
+LIMITATIONS:
+Diagnosis counts measure diagnosis records,
+not necessarily unique patients or encounters.
+
+The final ranked output should be reviewed
+to confirm the preliminary findings and check
+for any ties in first place.
+
+========================================================
+*/
