@@ -1,0 +1,203 @@
+Healthcare Analytics Capstone
+Business Insights & Recommendations Report
+Project: Healthcare Data Analytics Capstone
+Analysis period: January 1, 2024–August 1, 2026 (synthetic source-data coverage)
+Tools: PostgreSQL, pgAdmin 4, SQL, VS Code, Git/GitHub
+Scope: 14 completed SQL analyses; operational, revenue-cycle, and reporting insights
+Report updated: November 8, 2026
+Evidence status: Quantitative findings below are drawn from verified results retained in the project README and saved SQL analysis notes. Other completed analyses are summarized by purpose, without assigning unsupported numerical outcomes.
+Portfolio context: This project uses 100% synthetic healthcare data, not real patient records. The findings illustrate analytical methods and potential business decisions; they are not evidence of actual hospital performance or operational shortcomings.
+
+1. Executive summary
+This capstone investigates how a healthcare organization could monitor patient access, appointment reliability, insurance claim performance, and revenue-cycle efficiency using a connected PostgreSQL database. The underlying work comprises 11 source tables, data-quality checks, 14 SQL analyses, and reusable reporting objects.
+What the existing results show
+1. Missed and cancelled appointments deserve targeted investigation. Of 9,200 appointments, 762 were no-shows (8.28%) and 816 were cancelled (8.87%). Cardiology had the highest departmental no-show rate (9.38%), while Emergency Medicine had the largest absolute number of no-shows (173). These are different types of operational priority: a high rate points to relative exposure, while a high count points to total volume.
+2. Insurance denials vary by payer and department. Of 8,477 claims, 477 were denied (5.63%). Apex Health had the highest recorded payer denial rate (6.05%) and CommonCare the lowest (4.67%). Primary Care had the highest departmental denial rate (6.97%), whereas Emergency Medicine accounted for the greatest number of denied claims (144).
+3. Appointment type and provider-level views reveal possible follow-up priorities. Telehealth had the highest appointment-type no-show rate (10.37%). Provider 24 had the highest recorded provider no-show rate (11.64%). Both findings call for closer inspection of the size and composition of the underlying groups before considering interventions.
+4. Reusable reporting and careful data modeling are part of the solution. Claims and payments must be reconciled at compatible levels of detail to avoid overstating revenue. The project also established reporting views and parameterized KPI logic, alongside observed query-plan execution times of 110.746 ms, 78.437 ms, and 76.092 ms across iterations. Those individual timings are not proof that a specific index caused the changes.
+Recommended priorities
+Priority	Action for a simulated healthcare leadership team	Primary measures
+1 — Scheduling	Review Cardiology, Telehealth, and high-no-show provider workflows; test targeted reminders or rescheduling improvements only after reviewing the patient/appointment mix.	No-show rate and count; cancellations; completed appointments
+2 — Denials	Audit claim-denial reasons and documentation workflows for Apex Health and Primary Care; separately prioritize Emergency Medicine's higher denial volume.	Denied claims; denial rate; dollars associated with denials; appeal outcomes
+3 — Revenue visibility	Standardize billed, allowed, insurer-paid, patient-paid, and collected measures in reusable reporting.	Collection rates; outstanding responsibility; payer-level gaps; reconciliation exceptions
+
+
+Bottom line: The clearest existing evidence supports a two-track improvement agenda: investigate appointment attendance and claim denials, while using consistent financial definitions and reusable reports to make subsequent decisions more trustworthy.
+2. Data foundation and methodology
+2.1 Dataset and relational structure
+The project uses 11 synthetic CSV datasets loaded into PostgreSQL, linking patients, providers, departments, appointments, encounters, diagnoses, insurance coverage, claims, and payments.
+Data component	Original source rows	Role in analysis
+Patients (pat)	1,520	Patient identifiers and demographics
+Departments	8	Operational/service-line comparisons
+Providers	40	Provider-level performance
+Insurance plans	8	Payer comparisons
+Appointments	9,200	Attendance and scheduling outcomes
+Encounters	8,477	Recorded care utilization
+Diagnoses	14,989	Clinical categories and encounter associations
+Procedures	7,344	Services and charges
+Medications	4,489	Medication orders
+Claims	8,477	Billed/allowed amounts and claim status
+Payments	12,386	Individual payment transactions
+
+
+Counts in this table reflect the original data dictionary. Cleaned database counts can differ after corrections or deduplication. In particular, source-table counts should not be mistaken for period-specific KPI outputs.
+2.2 Data preparation and quality controls
+Before running the analyses, the project documented and addressed several data-quality issues:
+- 13 missing ZIP-code entries were identified for review.
+- 20 potentially duplicated patient demographic records were flagged; matching names and dates of birth were not automatically treated as proof of duplicate identity.
+- Inconsistent capitalization in city values was normalized.
+- Claim/payment exceptions and relevant nullable values were reviewed rather than indiscriminately removed.
+- An encounter_id relationship was added to the diagnoses table to support encounter-level diagnosis analysis.
+This matters because misleading relationships or duplicated transaction rows can distort operational counts and monetary measures. The diagnosis-to-encounter relationship was reconstructed for this synthetic dataset, which limits how confidently diagnosis-based results can be interpreted.
+2.3 Metric design and analytical safeguards
+- No-show rate: no-show appointments divided by all appointments in the comparison group. The project's reported denominator includes rescheduled appointments.
+- Cancellation rate: cancelled appointments divided by all appointments in the comparison group.
+- Claim denial rate: denied claims divided by claims in the comparison group.
+- Volume vs. rate: a department may lead in total events without having the highest event percentage.
+- Financial grain: a single claim can have multiple payment records; aggregate payments appropriately before joining them to one-row-per-claim billing amounts.
+- Time periods: the source extends into 2026 only through August 1. A raw 2026 total must not be compared as if it represents a complete year.
+The SQL work uses aggregation, conditional calculations, CTEs, grouping sets, DATE_TRUNC, window functions, execution plans, views, and a reusable function.
+3. Finding 1 — Appointment attendance is uneven across service lines
+Business question: Where are patients missing or cancelling scheduled appointments, and how should leaders distinguish relative rates from the absolute burden of missed visits?
+Verified organization-wide appointment outcomes (Question 3)
+Appointment status	Count	Share of all 9,200 appointments
+Completed	7,277	79.10%
+No-show	762	8.28%
+Cancelled	816	8.87%
+Rescheduled	345	3.75%
+Total	9,200	100.00%
+
+
+The combined 1,578 no-show or cancelled appointments represent 17.15% of the scheduled appointment records. This combined figure is descriptive; it is not a measure of revenue lost or of unique patients affected.
+Segments with the strongest observed signals
+Lens	Verified result	What it means
+Department — highest no-show rate	Cardiology: 9.38%	A larger proportion of its appointments were missed compared with other departments.
+Department — highest cancellation rate	Cardiology: 9.93%	Cardiology also leads in relative cancellations.
+Department — highest no-show count	Emergency Medicine: 173	The largest observed absolute volume of missed appointments; not the highest rate.
+Provider — highest no-show rate	Provider 24: 11.64%	Provider-level scheduling patterns merit a closer review, not an automatic performance judgment.
+Appointment type — highest no-show rate	Telehealth: 10.37%	The channel may deserve a targeted attendance-workflow assessment.
+Appointment type — highest cancellation rate	Follow-up: 9.39%	Follow-up scheduling and patient communication warrant inspection.
+
+
+Interpretation. Cardiology's 9.38% no-show rate is 1.10 percentage points above the organization-wide 8.28%. Telehealth's 10.37% is 2.09 percentage points above that benchmark. These are descriptive differences in the available synthetic records, not evidence of statistical significance or of a specific causal factor.
+
+Business significance. Unused appointment slots may constrain capacity and increase scheduling inefficiency. However, the dataset does not establish the reason for a missed appointment, whether a slot was backfilled, or its financial impact. The provider-level difference may also reflect appointment type, specialty, availability, or case mix.
+
+Recommendation. Pilot an attendance review that segments no-shows by department, appointment type, provider, and month. Examine reminder workflows, booking lead times, rescheduling practices, and whether missed slots are subsequently filled. Compare before/after no-show rates and counts using comparable periods and sufficient appointment volumes.
+
+Suggested Tableau visual: Departmental no-show rates with the corresponding appointment count, plus a monthly trend filtered by appointment type.
+4. Finding 2 — Claim denials show concentrated review opportunities
+Business question: How frequently are claims denied, and which payers and departments should receive the earliest revenue-cycle review?
+Verified claim outcomes (Question 4)
+Claim status	Claims	Share of 8,477 claims
+Paid	6,965	82.16%
+Partially paid	746	8.80%
+Pending	289	3.41%
+Denied	477	5.63%
+Total	8,477	100.00%
+
+
+Where denial rates and counts differ
+Comparison	Verified result	Implication for review
+Highest payer denial rate	Apex Health: 6.05%	Review insurer-specific patterns and denial reasons.
+Lowest payer denial rate	CommonCare: 4.67%	A comparison point; payer mix may differ.
+Highest departmental denial rate	Primary Care: 6.97%	Investigate whether denials reflect recurring documentation or workflow issues.
+Highest departmental denial count	Emergency Medicine: 144	Larger absolute claim-review workload even though the rate is not the highest.
+Highest diagnosis-category denial rate	Gastrointestinal: 6.50%	Directional only; the underlying diagnosis mapping is synthetic.
+Highest diagnosis-category denial count	Symptoms: 174	Not additive with other categories because claims can have multiple diagnoses.
+
+
+Interpretation. Apex Health's denial rate exceeds CommonCare's by 1.38 percentage points. Primary Care's 6.97% exceeds the overall 5.63% rate by 1.34 percentage points. Separately, Emergency Medicine's 144 denied claims account for approximately 30.2% of all denied claims, suggesting that a volume-based review queue could focus there even if another department has a higher rate.
+
+Business significance. Denials can require follow-up, add administrative work, and delay payment. The number of denials is not the same as dollars lost: some denials may be appealed successfully, partially resolved, or tied to different claim amounts. The current summary does not contain verified denial-reason codes, recovered dollars, or appeal outcomes.
+
+Recommendation. Establish a review queue with two views: high denial rates (to spot possible recurring process issues) and high denied-claim counts / dollar exposure (to prioritize workload). Examine denial reason codes and payer contract rules if those fields become available. Monitor first-pass acceptance, denial rate, appealed claims, overturned denials, and cash recovered.
+
+Suggested Tableau visual: Payer-level denial rate paired with total claim volume; a second view for department denial count and rate.
+5. Revenue-cycle analysis — a foundation for reliable financial decisions
+Business questions (Questions 2, 5, and 11): How do billed, allowed, and collected amounts differ across departments and payers? How much patient responsibility remains outstanding? Where do collections fall short of the allowed amount?
+
+These analyses were built in SQL, but verified aggregate dollar outputs for these questions were not retained in the currently available project findings. Accordingly, the report does not assign a dollar value to revenue leakage, collections, or department financial performance.
+
+The established analytical approach is nonetheless important:
+Measure	Meaning	Why it matters
+Billed amount	Charges submitted on claims	Should not be presented as revenue realized.
+Allowed amount	Amount recognized under the relevant claim/insurance arrangement	Provides a more useful contract-based comparison than billed charges alone.
+Insurer payments	Payments attributed to an insurer	Must be separated from patient payments.
+Patient payments	Collections from patients	Used against patient-responsibility measures, with consistent dates and allocation rules.
+Total collected	Actual recorded cash payments under the chosen definition	May differ from the allowed amount due to timing, payment status, adjustments, or unresolved balances.
+Outstanding patient responsibility	Patient responsibility less qualifying patient payments, subject to data rules	Helps identify balances for follow-up; is not automatically a collectible amount.
+
+
+Analytical finding: Separating claims from their multiple payment transactions and reconciling them at the appropriate grain is essential. Without this safeguard, a one-to-many join can inflate billed or allowed dollars, producing incorrect department or payer comparisons.
+
+Recommendation. Use the reusable encounter-financial reporting layer to build a consistent monthly reconciliation, then verify billed, allowed, insurer-paid, patient-paid, and collected amounts before prioritizing collection or leakage interventions. Any future report of “lost revenue” should explicitly distinguish contractual reductions, timing differences, denials, and genuinely uncollected balances.
+6. Utilization, providers, and service-line trends — completed analyses and evidence boundaries
+Questions 1, 6, 7, 8, 9, and 10 were completed to support patient-volume tracking, provider scorecards, frequent-patient review, repeat acute-care utilization, rolling trends, and leading diagnoses. Their value is primarily in establishing how the organization can investigate these issues. Numerical rankings and trend changes should not be stated until the corresponding result tables are rechecked and preserved.
+Question	Analysis established	Decision supported	Caution
+Q1	Monthly, quarterly, and yearly encounter and distinct-patient counts	Capacity and demand monitoring	2026 is not a complete year.
+Q6	Provider comparisons within department by utilization, collections, and no-show rate	Department-specific performance discussions	Provider mix and denominators matter; rankings are not a clinical quality judgment.
+Q7	High-utilization patients and associated diagnosis descriptions	Identifying cohorts for closer study	A high encounter count does not establish inappropriate care.
+Q8	Repeat acute-care encounters within 30/60/90 days	Revisits and continuity-of-care review	A repeat encounter is not automatically a qualifying inpatient readmission.
+Q9	Three-month rolling encounters and collections	Separating short-term variation from broader patterns	Three observed rows do not guarantee three calendar months when months are missing.
+Q10	Leading diagnosis categories by department and year	Service-line case-mix discussion	Synthetic encounter-diagnosis mapping limits interpretation; department/year partitioning must be checked.
+
+
+These are implemented analytical capabilities, not claims that any named provider or department performed poorly. The strongest quantitative findings presently documented remain the appointment and denial results in Sections 3–4.
+7. Technical solutions and reporting value
+Performance tuning (Question 12)
+EXPLAIN (ANALYZE, BUFFERS) was used to inspect execution plans, with recorded query-iteration execution times of 110.746 ms, 78.437 ms, and 76.092 ms. The timings suggest the tested executions differed, but they are individual observations. A controlled benchmark would need repeated runs, comparable system conditions, and plan/buffer inspection before attributing an improvement to indexing or a particular query rewrite.
+Reusable reporting views (Question 13)
+- vw_patient_utilization makes patient-encounter utilization metrics easier to reuse.
+- vw_encounter_financials exposes encounter, patient, and department identifiers alongside summarized claim, billed, allowed, collected, and insurer-paid measures.
+These views reduce the need to reconstruct multi-table logic in every downstream query, while still requiring that the underlying definitions and joins remain validated.
+Reusable business logic (Question 14)
+The PostgreSQL function packages date-parameterized KPI logic so that comparable reporting requests can use the same calculations instead of repeatedly rewriting them. Its results depend on consistent definitions of the date boundaries, encounter/transaction timing, and KPI denominators.
+
+Practical reporting implication: These components provide the SQL foundation for Part 2 Tableau dashboards and Part 3 Python analytics/ETL work, without treating either later phase as already delivered.
+8. Recommended action plan and measurement framework
+The following are recommendations derived from the synthetic dataset, not tested interventions.
+Horizon	Proposal	Baseline available now	What would demonstrate improvement
+Initial review	Investigate no-shows and cancellations by department, provider, and appointment type.	Overall no-show 8.28%; cancellation 8.87%	Lower comparable-period rates without obscuring appointment count or access.
+Initial review	Examine Cardiology attendance and Telehealth workflow.	Cardiology no-show 9.38%; Telehealth 10.37%	Improvement in segment-specific rate sustained across comparable periods.
+Initial review	Examine payer and departmental denial patterns.	Overall denial 5.63%; Apex 6.05%; Primary Care 6.97%	Lower denial rates alongside claim counts, appeals, and recoveries.
+Next reporting cycle	Add a count-based denial work queue for Emergency Medicine.	144 denied Emergency Medicine claims	Fewer unresolved claims and faster resolution, when resolution data is available.
+Next reporting cycle	Publish reconciled financial KPIs by payer/department.	Financial SQL exists; no verified aggregate totals reproduced here	Consistent totals across dashboards and underlying claims/payment records.
+Future comparison phase	Compare complete 2024 vs. 2025 and equivalent Jan–Aug windows for 2026.	Source dates span 2024 to August 2026	Like-for-like trends that do not mistake partial-year data for deterioration.
+
+
+An actual improvement study should define the intervention, eligible population, control or comparison period, and measurement cadence before making causal claims.
+9. Limitations and next analysis
+1. Synthetic data: This is a learning and portfolio simulation, so its distributions are not validated against a real health system.
+2. Selective saved numerical outputs: Verified figures were available for appointment attendance and claim denials. Other completed queries exist, but not all final result tables were available to support numerical claims in this report.
+3. Partial final year: The supplied data ends in August 2026; do not compare an incomplete year to full-year 2024 or 2025 totals without aligning the periods.
+4. Reconstructed diagnosis association: The diagnoses.encounter_id linkage was repaired for synthetic analysis. Diagnosis-category claims may overlap; diagnosis findings are directional, not independently clinically validated.
+5. Causal ambiguity: Elevated rates do not by themselves identify scheduling, documentation, payer, patient, or clinician causes.
+6. Financial definitions: Contractual adjustments, denied claims, outstanding patient balances, and collectible cash are different concepts; their values should not be combined or labeled interchangeably.
+7. Readmission terminology: A 30/60/90-day repeat acute-care encounter is not necessarily an inpatient readmission.
+Additional planned comparison questions (Q15–Q23)
+These analyses were proposed after the original 14-question SQL capstone and are not presented here as completed findings:
+- Year-over-year encounter and patient-volume comparisons.
+- Quarterly and seasonal utilization patterns.
+- New versus returning patient cohorts.
+- Department revenue comparisons across comparable periods.
+- Appointment no-show changes over time.
+- Payer and department denial-rate trends.
+- Patient-responsibility collection trends.
+- Repeat acute-care utilization across periods.
+- Revenue-leakage changes and payer comparisons.
+The next analytical step is to preserve outputs for these queries, then integrate new verified evidence into this report and the Tableau dashboard design.
+10. Conclusion
+The capstone demonstrates an end-to-end healthcare analytics workflow: designing a relational database, importing and cleaning synthetic records, applying SQL to business questions, and building reusable reporting infrastructure.
+
+The most actionable verified patterns are in appointment attendance and claim denials. With 762 no-shows, 816 cancellations, and 477 denied claims, the sample provides concrete opportunities to practice prioritizing operational review using both rates and volumes. Departmental and payer differences refine where that review might begin, while data limitations prevent unsupported conclusions about root causes or monetary losses.
+
+The broader SQL analyses establish a foundation for longitudinal demand, utilization, provider, and financial reporting. The next stage is to validate remaining result tables, add like-for-like year comparisons, and use the resulting metrics to build focused Tableau visuals—followed by Python-based analysis and automation.
+Evidence and traceability
+The reported numbers and technical notes come from existing capstone artifacts, rather than illustrative or invented values:
+- Question 3 — No-Show Analysis: appointment-status totals; rates by department, provider, and appointment type.
+- Question 4 — Claims Denial Analysis: claim statuses; denial rates and counts by payer, department, and diagnosis category.
+- Question 12 — Performance Tuning: recorded execution-plan timings.
+- Questions 13–14: reporting views and reusable date-filtered KPI function.
+- Project README.md: original source table counts, data-cleaning notes, business-question inventory, and documented interpretation limits.
+See the project directories [`03Business_Analysis`](../03Business_Analysis/) and [`02Data_Quality`](../02Data_Quality/) for the SQL and cleaning methodology. Numerical claims should be revised only after checking the corresponding executed query outputs.
